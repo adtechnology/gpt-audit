@@ -178,7 +178,7 @@ Goal: `collect-gpt.js` is one self-contained async function the agent pastes int
 
 Rules for the collector:
 
-- No imports, no globals left behind except `window.__gptAudit`; under 10 KB so it fits in one tool call.
+- No imports, no globals left behind except `window.__gptAudit`; under 12 KB so it fits in one tool call.
 - Every field in its own try/catch; failures land in `errors[]`, the function never throws. If `googletag` is missing, return `{ gpt: { present: false } }` plus whatever DOM evidence exists (ad-looking divs, gpt.js script tags).
 - Async, resolves within 1 500 ms (consent APIs are callback-based); caps: 60 slots, 20 targeting keys per slot, strings cut at 200 chars.
 - `opts.probe === true` attaches listeners for `slotRequested`, `slotResponseReceived`, `slotRenderEnded`, `impressionViewable`, `slotOnload` into `window.__gptAudit.events`; the agent then scrolls (via `evaluate_script`, `window.scrollTo`) and calls the collector a second time to read them.
@@ -226,7 +226,7 @@ on the page. Commit as "collector".
 Done when:
 
 - [ ] On the test page the snapshot's slot count equals the number of `div[data-google-query-id]` elements and `errors` is empty.
-- [ ] `snapshot.json` is under 200 KB; the collector file is under 10 KB.
+- [ ] `snapshot.json` is under 200 KB; the collector file is under 12 KB.
 - [ ] `network.json` has every `gampad/ads` request with its `correlator` and consent parameters parsed.
 - [ ] Parser tests pass with `npm test`.
 

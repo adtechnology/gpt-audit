@@ -1,24 +1,42 @@
-# Anomaly catalog
+# Anomaly Catalog
 
-Rule ids are stable; the report, the tests and the fixture refer to them. Severity: high, medium, low.
-Evidence names the fields of `snapshot.json` (collector) and `network.json` (network-extract).
+Rule IDs are stable; the analyzer, the report, the test suite, and the demo fixture refer to them.
+Severity levels: `high`, `medium`, `low`.
+Evidence names the exact fields of `snapshot.json` (collector) and `network.json` (network-extract).
 
-| ID | Rule | Severity | Evidence (snapshot / network) | Fix in the report |
-| --- | --- | --- | --- | --- |
-| R01 | Slot defined but never requested or displayed | High | slot has no `response`, no `dom.queryId`, and no `gampad/ads` row names its ad unit | call `googletag.display(id)` or remove the definition |
-| R02 | Slot div missing in DOM or duplicated | High | `dom.exists` false, or the element id occurs more than once in the DOM | fix the container ids |
-| R03 | Unfilled slot | Medium | request was made (queryId or network row) but `response` null, or iframe absent / 0 height | check line-item targeting, sizes, floor prices |
-| R04 | No requested size fits the viewport | Medium | every entry of `sizes` is wider than `meta.viewport.w` or than `dom.rect.w` | add a size mapping or a smaller size |
-| R05 | Container size differs from rendered creative | Medium | `dom.rect` vs `iframe.w/h` differ by more than 2 px, or `dom.reservedHeight` false | reserve min-height per breakpoint (CLS) |
-| R06 | Single Request Architecture off | Low | number of `gampad/ads` rows ≥ number of requested slots and no row has `iu_parts` | `googletag.pubads().enableSingleRequest()` |
-| R07 | Mixed correlators in one page view | High | more than one distinct `correlator` across the rows of one load | check for repeated `display()` or page-level resets |
-| R08 | Initial load disabled but nothing ever refreshed | High | `gpt.initialLoadDisabled` true, zero `gampad/ads` rows, no refresh in probe events | add the header-bidding timeout fallback that calls `refresh()` |
-| R09 | Consent mismatch | High | `gdpr=1` with empty `gdpr_consent`; `gdpr=1` but no `__tcfapi`; `npa` absent while TCF purpose 1 consent is false | fix the CMP wiring or set `npa`/`ltd` |
-| R10 | Legacy or duplicate gpt.js | Medium | `gpt.legacyHost` true, more than one gpt.js script tag, or a tag without `async` | one async tag from `securepubads.g.doubleclick.net/tag/js/gpt.js` |
-| R11 | Command queue never flushed | High | `gpt.cmdQueueLength` > 0 after load, `gpt.pubadsReady` false | `googletag.enableServices()` missing or an earlier callback throws |
-| R12 | Refresh interval under 30 s | Medium | probe events: two `slotRequested` for one slot less than 30 s apart | respect the 30 s minimum |
-| R13 | Targeting value looks like PII or is oversized | High | regex for email / phone / long hex ids in slot or page `targeting` or `cust_params`; request URL longer than 8 000 chars | hash or drop the key, trim key-values |
-| R14 | Prebid keys without a bid, or timeout below response times | Medium | `hb_*` targeting on a slot with no bid in `neighbours.prebid.bids`; `bidderTimeout` lower than the median `timeToRespond` | check `setTargetingForGPTAsync`, raise the timeout |
-| R15 | Slot never viewable | Low | probe: no `impressionViewable` after the scroll pass, slot far below the fold without lazy load | lazy-load below-the-fold slots |
+## Implemented Rules (R01–R10)
 
-Finding format: `{ "id": "R05", "severity": "medium", "slot": "div-gpt-ad-d", "evidence": "container 300×100, iframe 300×250", "fix": "..." }`.
+| ID | Rule | Severity | Status | Evidence (snapshot / network) | Fix in the report |
+| --- | --- | --- | --- | --- | --- |
+| R01 | Slot defined but never requested or displayed | High | Implemented | Slot in `slots[]` has no `response`, no `dom.queryId`, no `slotRequested` events, and no `gampad/ads` display request mentions its ad unit or elementId | Call `googletag.display(id)` or remove the definition |
+| R02 | Slot div missing in DOM or duplicated | High | Implemented | `dom.exists` is false, or two or more slots in `slots[]` share the same `elementId` | Ensure a unique container div exists in DOM with matching id |
+| R03 | Unfilled slot | Medium | Implemented | `slot.render.isEmpty === true`. (Note: filled slots with `lineItemId: null` and `isBackfill: true` are AdX/Open Bidding fills and are not flagged as unfilled) | Check line-item targeting, floor prices, and advertiser demand for the ad unit |
+| R04 | No requested size fits the viewport | Medium | Implemented | Every entry of `sizes` is wider than `meta.viewport.w`. (`1x1` and `fluid` sizes fit any container and are exempt) | Configure responsive `sizeMapping` or include smaller creative sizes for narrow screens |
+| R05 | Container size differs from rendered creative | Medium | Implemented | Rendered creative height differs from container `dom.boundingRect.height` by > 2 px, or `dom.reservedHeight` is false. (`1x1` and `fluid` exempt) | Reserve container min-height per breakpoint via CSS matching creative height to prevent CLS |
+| R06 | Single Request Architecture off | Low | Implemented | Number of `kind: "display"` `gampad/ads` requests ≥ requested slot count (≥ 2) and no request contains `iu_parts` or `enc_prev_ius` (video requests excluded) | Call `googletag.pubads().enableSingleRequest()` before `enableServices()` |
+| R07 | Mixed correlators in one page view | High | Implemented | More than one distinct `correlator` across `kind: "display"` ad requests in one page view (video requests carry independent correlators) | Ensure initial slots are requested in a single batched call; eliminate repeated `display()` calls |
+| R08 | Initial load disabled but nothing ever refreshed | High | Implemented | `gpt.initialLoadDisabled === true`, zero `kind: "display"` requests fired, and no probe `slotRequested` events | Add a fallback timeout in header bidding to trigger `googletag.pubads().refresh()` |
+| R09 | Consent mismatch | High | Implemented | `gdpr=1` with empty/missing `gdpr_consent` (length 0); or `gdpr=1` without `window.__tcfapi` present; or TCF purpose 1 consent false while ad requests omit both `npa=1` and `ltd=1` | Verify CMP wiring passes a valid TC string before GPT requests, or set `npa=1`/`ltd=1` when Purpose 1 consent is denied |
+| R10 | Legacy or duplicate gpt.js | Medium | Implemented | `gpt.legacyHost === true` (`googletagservices.com`), more than one gpt.js script tag, or a script tag without `async` | Load exactly one asynchronous tag from `https://securepubads.g.doubleclick.net/tag/js/gpt.js` |
+
+## Planned / Stretch Rules (R11–R15)
+
+| ID | Rule | Severity | Status | Evidence (snapshot / network) | Fix in the report |
+| --- | --- | --- | --- | --- | --- |
+| R11 | Command queue never flushed | High | Planned | `gpt.cmdQueueLength > 0` after page load, and `gpt.pubadsReady === false` | Verify `googletag.enableServices()` was invoked and check console for unhandled syntax errors in callbacks |
+| R12 | Refresh interval under 30 s | Medium | Planned | Probe events record two `slotRequested` events for the same slot less than 30 s apart | Respect the 30-second minimum auto-refresh interval mandated by policy |
+| R13 | Targeting value looks like PII or is oversized | High | Planned | Regex matches email addresses, phone numbers, or UUID/hex hashes in slot/page `targeting` or `cust_params`; or ad request URL > 8 000 chars | Hash or remove PII keys; trim excessive targeting parameters |
+| R14 | Prebid keys without a bid, or timeout below response times | Medium | Planned | `hb_*` targeting keys present on a slot without a corresponding winning bid in `neighbours.prebid.bids`; or `bidderTimeout` lower than median `timeToRespond` | Review `pbjs.setTargetingForGPTAsync()` timing; raise `bidderTimeout` |
+| R15 | Slot never viewable | Low | Planned | Probe events record no `impressionViewable` after full scroll pass; slot located far below the fold without GPT lazy-loading enabled | Enable GPT lazy loading (`googletag.pubads().enableLazyLoad()`) for below-the-fold slots |
+
+## Finding Format (`findings.json`)
+
+```json
+{
+  "id": "R05",
+  "severity": "medium",
+  "slot": "advert_tmg_ban",
+  "evidence": "container #advert_tmg_ban height (100px) differs from creative height (250px) by 150px",
+  "fix": "reserve container min-height matching creative height (250px) to eliminate layout shift"
+}
+```
