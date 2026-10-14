@@ -2,6 +2,10 @@
 
 Oct 14, 2026 · @Carlos Bracho
 
+Implementation note: the original phase tables below describe the prototype plan. Current evidence
+classification and capture behavior are maintained in `skills/gpt-audit/SKILL.md` and
+`skills/gpt-audit/references/anomaly-catalog.md`; those supersede the initial severity heuristics.
+
 ## Goal and pitch
 
 One repo that installs as a plugin in Antigravity, Claude Code and OpenAI Codex and, given a URL, audits the Google Publisher Tag (GPT) setup on that page: it opens the page in a real Chrome through Chrome DevTools for agents (`chrome-devtools-mcp`), reads the live `googletag` state and every Ad Manager ad request, runs a fixed set of anomaly rules and writes a report of all slots plus the findings.

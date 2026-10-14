@@ -1,49 +1,25 @@
-// R09: Consent mismatch
-// Severity: High
-// Evidence: gdpr=1 with empty gdpr_consent; gdpr=1 but no __tcfapi; npa absent while purpose1 consent false
+// R09: Review incomplete request consent signaling, without inferring legal compliance.
 
 export default function r09ConsentMismatch(snapshot, network) {
   const findings = [];
-  const requests = network?.requests || [];
-  const tcf = snapshot?.neighbours?.consent?.tcf;
+  const requests = (network?.requests || []).filter(req => req.kind !== 'video' && !req.error && !req.urlTruncated);
 
-  // 1. gdpr=1 with empty gdpr_consent
-  const reqsWithGdprEmptyConsent = requests.filter(r => r.gdpr === '1' && (!r.gdpr_consent || r.gdpr_consent === 0));
+  // Limited-ad requests can be valid without a TC string. The local TCF global and
+  // Purpose 1 snapshot alone do not determine the permitted ad-serving treatment.
+  const reqsWithGdprEmptyConsent = requests.filter(req => {
+    if (String(req.gdpr) !== '1' || String(req.ltd) === '1') return false;
+    const consent = req.gdpr_consent ?? req.raw?.gdpr_consent;
+    return consent == null || consent === 0 || (typeof consent === 'string' && !consent.trim());
+  });
   if (reqsWithGdprEmptyConsent.length > 0) {
     findings.push({
       id: 'R09',
-      severity: 'high',
+      severity: 'medium',
+      status: 'needs-validation',
       slot: null,
-      evidence: `${reqsWithGdprEmptyConsent.length} ad request(s) specify gdpr=1 but gdpr_consent (TC string) is empty or missing`,
-      fix: `ensure CMP generates and provides a valid IAB TC string before ad requests are sent`
+      evidence: `${reqsWithGdprEmptyConsent.length} display ad request(s) specify gdpr=1 with an empty or missing TC string and no explicit ltd=1 signal; this requires signaling review, not a conclusion about consent or legal compliance`,
+      fix: `verify request timing, CMP signaling and the intended serving treatment, including automatic TCF-driven limited ads; inspect the full consent context before changing privacy settings`
     });
-  }
-
-  // 2. gdpr=1 but no __tcfapi
-  const hasGdprRequest = requests.some(r => r.gdpr === '1');
-  const hasTcfApi = tcf?.present === true;
-  if (hasGdprRequest && !hasTcfApi) {
-    findings.push({
-      id: 'R09',
-      severity: 'high',
-      slot: null,
-      evidence: `ad requests indicate gdpr=1 but window.__tcfapi is not detected on the page`,
-      fix: `ensure the IAB TCF CMP stub is installed in the document <head> prior to loading GPT`
-    });
-  }
-
-  // 3. npa absent while purpose1 consent is false
-  if (tcf?.present && tcf.gdprApplies === true && tcf.purpose1 === false) {
-    const nonCompliantReqs = requests.filter(r => r.npa !== '1' && r.ltd !== '1');
-    if (nonCompliantReqs.length > 0) {
-      findings.push({
-        id: 'R09',
-        severity: 'high',
-        slot: null,
-        evidence: `TCF purpose 1 consent is false under GDPR, but ${nonCompliantReqs.length} ad request(s) omit npa=1 and ltd=1`,
-        fix: `configure CMP / GPT privacy settings to request non-personalized ads (npa=1) or limited ads (ltd=1) when Purpose 1 consent is denied`
-      });
-    }
   }
 
   return findings;

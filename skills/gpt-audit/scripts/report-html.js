@@ -27,9 +27,10 @@ export function renderHtmlReport(snapshot, network, findings = [], jsonReport = 
   if (!gpt.present) {
     healthScore = 0;
   } else {
-    healthScore -= (summary.high * 15);
-    healthScore -= (summary.medium * 5);
-    healthScore -= (summary.low * 2);
+    const actionable = findings.filter(f => f.status !== 'needs-validation');
+    healthScore -= actionable.filter(f => f.severity === 'high').length * 15;
+    healthScore -= actionable.filter(f => f.severity === 'medium').length * 5;
+    healthScore -= actionable.filter(f => f.severity === 'low').length * 2;
     if (compliance?.active && !compliance.passed) {
       healthScore -= 10;
     }
@@ -37,7 +38,7 @@ export function renderHtmlReport(snapshot, network, findings = [], jsonReport = 
   healthScore = Math.max(0, Math.min(100, healthScore));
 
   let scoreColor = '#34d399'; // Emerald
-  let scoreLabel = 'Excellent Health';
+  let scoreLabel = 'Few Detected Issues';
   let scoreClass = 'score-excellent';
   if (healthScore < 60) {
     scoreColor = '#f43f5e'; // Rose
@@ -62,7 +63,8 @@ export function renderHtmlReport(snapshot, network, findings = [], jsonReport = 
   const displayRequests = requests.filter(r => r.kind === 'display');
   const videoRequests = requests.filter(r => r.kind === 'video');
   const ppidDetected = requests.some(r => r.ppid === true);
-  const sraActive = requests.some(r => r.isSra === true) || (displayRequests.length > 0 && displayRequests.some(r => r.iu_parts || r.enc_prev_ius));
+  const sraLabel = jsonReport?.features?.sra || 'unknown';
+  const sraActive = sraLabel === 'observed';
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -712,13 +714,13 @@ export function renderHtmlReport(snapshot, network, findings = [], jsonReport = 
               <svg width="12" height="12" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
               GPT: ${escapeHtml(gpt.version || 'Loaded')}
             </span>
-            <span class="pill ${consent.tcStringPresent ? 'pill-pass' : 'pill-fail'}">
-              Consent: ${consent.tcStringPresent ? `GDPR (${consent.tcStringLength} chars)` : 'No TC String'}
+            <span class="pill ${consent.tcStringPresent === true ? 'pill-pass' : ''}">
+              TC string: ${consent.tcStringPresent == null ? 'unknown' : consent.tcStringPresent ? `present (${consent.tcStringLength} chars)` : 'absent'}
             </span>
-            <span class="pill ${sraActive ? 'pill-pass' : 'pill-fail'}">
-              SRA: ${sraActive ? 'Enabled' : 'Disabled'}
+            <span class="pill ${sraActive ? 'pill-pass' : ''}">
+              SRA: ${escapeHtml(sraLabel)}
             </span>
-            <span class="pill ${ppidDetected ? 'pill-pass' : 'pill-fail'}">
+            <span class="pill ${ppidDetected ? 'pill-pass' : ''}">
               PPID: ${ppidDetected ? 'Present' : 'Absent'}
             </span>
             ${compliance?.active ? `
@@ -740,17 +742,22 @@ export function renderHtmlReport(snapshot, network, findings = [], jsonReport = 
             <div class="gauge-number">${healthScore}<span>/100</span></div>
           </div>
           <div class="score-title" style="color:${scoreColor}">${escapeHtml(scoreLabel)}</div>
-          <div class="score-desc">${summary.high} High &bull; ${summary.medium} Med &bull; ${summary.low} Low</div>
+          <div class="score-desc">Rule score; ${summary.needsValidation || 0} observation(s) need validation. Coverage limits apply.</div>
         </div>
       </div>
     </header>
+
+    <section class="section-card" aria-label="Evidence limits">
+      <h2>Evidence limits</h2>
+      <ul>${(jsonReport.limitations || []).map(note => `<li>${escapeHtml(note)}</li>`).join('')}</ul>
+    </section>
 
     <!-- KPI METRICS GRID -->
     <section class="kpi-grid">
       <div class="kpi-card">
         <div class="kpi-label">Slots Defined</div>
         <div class="kpi-value">${slots.length}</div>
-        <div class="kpi-sub">${slots.filter(s => s.inViewportOnLoad).length} in viewport on load</div>
+        <div class="kpi-sub">${slots.filter(s => s.inViewportOnLoad).length} in first observed viewport</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-label">Ad Requests (GAM)</div>
@@ -829,9 +836,10 @@ export function renderHtmlReport(snapshot, network, findings = [], jsonReport = 
                 const sizeRend = Array.isArray(s.renderedSize) ? `${s.renderedSize[0]}×${s.renderedSize[1]}` : (s.renderedSize || 'none');
                 const isBackfill = s.render?.isBackfill === true;
                 const isEmpty = s.render?.isEmpty === true;
-                let fillBadge = '<span class="badge-fill direct">Direct / Standard</span>';
+                let fillBadge = '<span class="badge-fill">Unknown / not observed</span>';
                 if (isEmpty) fillBadge = '<span class="badge-fill unfilled">Unfilled</span>';
                 else if (isBackfill) fillBadge = '<span class="badge-fill adx">AdX / Open Bidding</span>';
+                else if (s.render?.isEmpty === false && s.render?.isBackfill === false) fillBadge = '<span class="badge-fill direct">Direct / Standard</span>';
 
                 return `
                 <tr>
@@ -843,8 +851,8 @@ export function renderHtmlReport(snapshot, network, findings = [], jsonReport = 
                   <td>${escapeHtml(s.lineItemId ?? 'null')}</td>
                   <td>${escapeHtml(s.creativeId ?? 'null')}</td>
                   <td>${s.safeFrame ? '<span style="color:var(--accent-emerald)">Yes</span>' : '<span style="color:var(--text-dim)">No</span>'}</td>
-                  <td>${s.inViewportOnLoad ? '<span style="color:var(--primary)">Yes</span>' : '<span style="color:var(--text-dim)">No</span>'}</td>
-                  <td><span style="font-size:11px;color:var(--text-dim)">${(s.targetingKeys || []).slice(0, 3).join(', ')}${(s.targetingKeys?.length > 3 ? '…' : '') || 'none'}</span></td>
+                  <td>${s.inViewportOnLoad == null ? 'Unknown' : s.inViewportOnLoad ? '<span style="color:var(--primary)">Yes</span>' : '<span style="color:var(--text-dim)">No</span>'}</td>
+                  <td><span style="font-size:11px;color:var(--text-dim)">${escapeHtml(((s.targetingKeys || []).slice(0, 3).join(', ') + (s.targetingKeys?.length > 3 ? '…' : '')) || 'none')}</span></td>
                 </tr>`;
               }).join('')}
             </tbody>
@@ -881,13 +889,13 @@ export function renderHtmlReport(snapshot, network, findings = [], jsonReport = 
                   <td><b>${idx + 1}</b></td>
                   <td><span class="badge-sev ${r.kind === 'video' ? 'medium' : 'low'}">${escapeHtml(r.kind)}</span></td>
                   <td><code>${escapeHtml(r.correlator || 'none')}</code></td>
-                  <td>${r.ppid ? '<span style="color:var(--accent-emerald)">Yes</span>' : '<span style="color:var(--text-dim)">No</span>'}</td>
+                  <td>${r.ppid == null ? 'Unknown' : r.ppid ? '<span style="color:var(--accent-emerald)">Yes</span>' : '<span style="color:var(--text-dim)">No</span>'}</td>
                   <td><code>${escapeHtml(r.adUnits?.[0] ? `${r.adUnits[0]} (${r.adUnits.length})` : 'none')}</code></td>
-                  <td><span style="color:var(--accent-emerald)">${escapeHtml(r.status ?? 200)}</span></td>
-                  <td>${r.duration ? `${Math.round(r.duration)} ms` : '-'}</td>
+                  <td><span style="color:${typeof r.status === 'number' && r.status >= 200 && r.status < 400 ? 'var(--accent-emerald)' : 'var(--text-dim)'}">${escapeHtml(r.status ?? 'unknown')}</span></td>
+                  <td>${r.duration != null ? `${Math.round(r.duration)} ms` : 'unknown'}</td>
                   <td>${escapeHtml(r.gdpr ?? '-')}</td>
-                  <td>${r.gdpr_consent_length > 0 ? `<span style="color:var(--accent-emerald)">Yes (${r.gdpr_consent_length} chars)</span>` : '<span style="color:var(--text-dim)">No</span>'}</td>
-                  <td><code>npa:${escapeHtml(r.npa ?? '0')}, ltd:${escapeHtml(r.ltd ?? '0')}, rdp:${escapeHtml(r.rdp ?? '0')}</code></td>
+                  <td>${r.gdpr_consent_length == null ? 'Unknown' : r.gdpr_consent_length > 0 ? `<span style="color:var(--accent-emerald)">Yes (${r.gdpr_consent_length} chars)</span>` : '<span style="color:var(--text-dim)">No</span>'}</td>
+                  <td><code>npa:${escapeHtml(r.npa ?? '-')}, ltd:${escapeHtml(r.ltd ?? '-')}, rdp:${escapeHtml(r.rdp ?? '-')}</code></td>
                 </tr>
               `).join('')}
             </tbody>
@@ -911,13 +919,15 @@ export function renderHtmlReport(snapshot, network, findings = [], jsonReport = 
 
         ${findings.length === 0 ? `
           <div style="text-align:center; padding: 48px; color:var(--accent-emerald)">
-            <h3>No anomalies detected! Setup is compliant and healthy.</h3>
+            <h3>No rule findings in the supplied evidence.</h3>
+            <p>This sample does not establish overall compliance or site health.</p>
           </div>
         ` : findings.map(f => `
           <div class="finding-card ${f.severity?.toLowerCase()}" data-sev="${f.severity?.toLowerCase()}">
             <div class="finding-header">
               <span class="finding-id">[${escapeHtml(f.id)}]</span>
               <span class="badge-sev ${f.severity?.toLowerCase()}">${escapeHtml(f.severity)}</span>
+              ${f.status ? `<span>${escapeHtml(f.status)}</span>` : ''}
             </div>
             ${f.slot ? `<div class="finding-slot">Affected Slot: <code>${escapeHtml(f.slot)}</code></div>` : ''}
             <div class="finding-evidence"><b>Evidence:</b> ${escapeHtml(f.evidence)}</div>

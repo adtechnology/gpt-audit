@@ -137,12 +137,14 @@ test('analyze: triggers R01, R05, R06, R07, and R09 on synthetic fixture', async
   // Assert R07 is triggered (Mixed correlators across display requests: 111111 vs 222222)
   assert.ok(ruleIds.includes('R07'), 'Expected R07 to be triggered');
   const fR07 = findings.find(f => f.id === 'R07');
-  assert.equal(fR07.severity, 'high');
+  assert.equal(fR07.severity, 'low');
+  assert.equal(fR07.status, 'needs-validation');
 
   // Assert R09 is triggered (gdpr=1 with gdpr_consent = 0)
   assert.ok(ruleIds.includes('R09'), 'Expected R09 to be triggered');
   const fR09 = findings.find(f => f.id === 'R09');
-  assert.equal(fR09.severity, 'high');
+  assert.equal(fR09.severity, 'medium');
+  assert.equal(fR09.status, 'needs-validation');
 
   // Assert R03 is NOT triggered on slot_backfill_adx (it has isBackfill: true, isEmpty: false)
   const fR03 = findings.find(f => f.id === 'R03' && f.slot === 'slot_backfill_adx');
@@ -151,9 +153,9 @@ test('analyze: triggers R01, R05, R06, R07, and R09 on synthetic fixture', async
   // Test report generation
   const { markdown, json, html } = renderReport(snapshot, network, findings);
   assert.ok(markdown.includes('# GPT Audit Report: https://fixture.example.com/article'));
-  assert.ok(markdown.includes('High Severity (3)'));
-  assert.ok(markdown.includes('Medium Severity (1)'));
-  assert.ok(markdown.includes('Low Severity (1)'));
+  assert.ok(markdown.includes('High Severity (1)'));
+  assert.ok(markdown.includes('Medium Severity (2)'));
+  assert.ok(markdown.includes('Low Severity (2)'));
   assert.ok(markdown.includes('AdX/OB (7777777)')); // Shows sourceAgnosticLineItemId for backfill slot
 
   // Test HTML report generation

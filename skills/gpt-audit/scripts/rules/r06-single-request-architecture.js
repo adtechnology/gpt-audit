@@ -1,27 +1,29 @@
-// R06: Single Request Architecture off
-// Severity: Low
-// Evidence: number of display gampad/ads rows >= requested slots and no iu_parts (video requests excluded)
+// R06: Optional batching opportunity, never evidence of a serving failure.
 
 export default function r06SingleRequestArchitecture(snapshot, network) {
   const findings = [];
-  const displayRequests = (network?.requests || []).filter(r => r.kind === 'display');
+  const displayRequests = (network?.requests || []).filter(r => r.kind === 'display' && !r.error && !r.urlTruncated);
 
   if (displayRequests.length === 0) return findings;
 
   const hasSra = displayRequests.some(r => r.isSra || r.iu_parts || r.enc_prev_ius);
-  if (hasSra) return findings;
+  if (hasSra || snapshot?.gpt?.config?.singleRequest === true) return findings;
 
-  const slots = snapshot?.slots || [];
-  const requestedSlots = slots.filter(s => s.dom?.queryId || s.render || (snapshot?.events || []).some(e => e.slotElementId === s.elementId && e.name === 'slotRequested'));
-  const threshold = Math.max(2, requestedSlots.length);
+  const identities = new Set();
+  for (const req of displayRequests) {
+    const dids = req.slotElementIds ?? req.dids ?? req.raw?.dids;
+    const ids = Array.isArray(dids) ? dids : typeof dids === 'string' ? dids.split(/[~,]/).filter(Boolean) : [];
+    for (const identity of ids.length ? ids.map(id => `id:${id}`) : (req.adUnits || (req.iu ? [req.iu] : [])).map(path => `path:${path}`)) identities.add(identity);
+  }
 
-  if (displayRequests.length >= 2 && displayRequests.length >= requestedSlots.length) {
+  if (displayRequests.length >= 2 && identities.size >= 2) {
     findings.push({
       id: 'R06',
       severity: 'low',
+      status: 'optimization',
       slot: null,
-      evidence: `Single Request Architecture (SRA) is disabled: ${displayRequests.length} display requests fired independently without iu_parts batching`,
-      fix: `call googletag.pubads().enableSingleRequest() before googletag.enableServices()`
+      evidence: `${displayRequests.length} display requests for at least ${identities.size} slot/ad-unit identities were observed without SRA batching; independent requests can be intentional for lazy loading, refresh, or header bidding`,
+      fix: `if several slots are eligible at the same time, consider googletag.setConfig({ singleRequest: true }) before googletag.enableServices(); confirm that batching fits the site's request strategy`
     });
   }
 

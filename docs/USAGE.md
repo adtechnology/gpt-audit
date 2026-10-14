@@ -74,12 +74,12 @@ flowchart TD
 ```
 
 1. **Verify MCP Tools**: Validates `navigate_page`, `evaluate_script`, `list_network_requests`, `get_network_request`, `take_screenshot`.
-2. **Navigate with Pre-Listeners**: Injects `init-listeners.js` as `initScript` before page scripts execute to guarantee initial `slotRequested` and `slotResponseReceived` events are recorded.
+2. **Navigate with Pre-Listeners**: Uses `init-listeners.js` as `initScript` when supported. Probe metadata records navigation-time or late attachment; unavailable initial events are disclosed without reloading.
 3. **Handle Consent (CMP)**: Automatically clicks "Accept all" if an IAB TCF / Sourcepoint / OneTrust banner appears.
 4. **Screenshot**: Saves `out/<host>/page.png`.
 5. **Initial Snapshot**: Runs `collectGpt({ probe: true })` inside page.
 6. **Scroll & Settle**: Scrolls in 600 px increments to trigger lazy-loaded slots, then captures the final snapshot with probe events (`out/<host>/snapshot.json`).
-7. **Network Harvest**: Calls `list_network_requests` and `get_network_request` for GAM ad calls (`gampad/ads`) and libraries (`gpt.js`, `pubads_impl`), saving verbatim tool output to `out/<host>/network-raw.txt`, then parses into `out/<host>/network.json`.
+7. **Network Harvest**: Saves full GAM/library request details, then runs `network-extract.js network-raw.txt --timings snapshot.json -o network.json`. Passive timing entries enrich exact matches. Missing metadata remains unknown; truncated URLs require full details.
 8. **Analyze**: Runs `analyze.js` applying rules R01–R10 to produce `out/<host>/findings.json`.
 9. **Report**: Runs `report.js` to create `report.md` and `report.json` (and `comparison.md` if multiple URLs).
 10. **Publisher Console**: Evaluates `googletag.openConsole()`, captures `out/<host>/console.png`.
@@ -129,21 +129,33 @@ The Slot Table in `report.md` classifies ad fills into three clear categories:
 - **Unfilled**: Slot requested but no ad was returned (displays `unfilled`).
 
 ### Findings Grouped by Severity
-- **High Severity**: Critical errors that prevent monetization, break user tracking, or violate privacy:
-  - `[R01]` Slot defined but never requested or displayed.
+Severity represents an audit priority, not a legal verdict. A `needs-validation` status explicitly
+requires publisher context before treating an observation as a failure.
+
+- **High Severity**: Strong evidence of a serving/integration problem:
+  - `[R01]` Active slot has no observed request. Hidden/inactive slots are low-priority validation items.
   - `[R02]` Container div missing or duplicate IDs in DOM.
-  - `[R07]` Mixed correlators in a single page view.
   - `[R08]` Initial load disabled with no refresh fallback.
-  - `[R09]` GDPR consent mismatch or missing TC string.
-- **Medium Severity**: Suboptimal setup, potential CLS, or unfilled inventory:
+- **Medium Severity**: Placement issues, signaling validation or unfilled inventory:
   - `[R03]` Unfilled ad slot.
   - `[R04]` No requested size fits the current viewport.
-  - `[R05]` Container size differs from creative or missing `reservedHeight` (CLS risk).
+  - `[R05]` Fixed creative exceeds visible placement geometry; hidden/fluid/parent reservations are considered. No CLS value is inferred.
+  - `[R09]` Missing captured TC string when `gdpr=1`, requiring integration/mode validation. P1 rejection alone is not a failure.
   - `[R10]` Legacy host (`googletagservices.com`) or duplicate gpt.js tags.
 - **Low Severity**: Architecture recommendations:
-  - `[R06]` Single Request Architecture (SRA) disabled.
+  - `[R06]` Individual requests offer an optional SRA batching opportunity.
+  - `[R07]` Multiple correlators need refresh/page-view context; they are not a high-severity failure alone.
 - **Publisher Compliance (High / Medium)**:
   - `[R16]` Publisher mandatory parameter missing (e.g. PPID omitted, required page targeting absent, required custom parameters missing in `cust_params`).
+
+Reports preserve SRA encoding, Prebid and initial-load metadata in JSON and comparisons. Absent
+configuration, statuses, timings and privacy parameters stay unknown. The HTML rule score excludes
+`needs-validation` observations and includes evidence limits. Initial viewport means first observed
+viewport; slots first discovered after scrolling have unknown initial visibility.
+
+Inspect material console errors and vendor request chains using the
+[evidence review guide](../skills/gpt-audit/references/evidence-review.md). Supplemental review notes
+retain request/message references without changing deterministic rule findings.
 
 ---
 
