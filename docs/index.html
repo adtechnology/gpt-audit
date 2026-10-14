@@ -1155,8 +1155,8 @@ codex</code></pre>
             <span class="rule-id">R04</span>
             <span class="badge-sev medium">Medium</span>
           </div>
-          <div class="rule-name">No Requested Size Fits Viewport</div>
-          <div class="rule-evidence">All requested fixed sizes exceed viewport width (<code>1x1</code> and <code>fluid</code> exempt).</div>
+          <div class="rule-name">No Active Size Fits Viewport or Container</div>
+          <div class="rule-evidence">Active mapped sizes exceed available width; empty mappings suppress the slot. <code>1x1</code> and <code>fluid</code> are exempt.</div>
           <div class="rule-fix">Configure responsive sizeMapping or smaller creative sizes.</div>
         </div>
 
@@ -1166,8 +1166,8 @@ codex</code></pre>
             <span class="rule-id">R05</span>
             <span class="badge-sev medium">Medium</span>
           </div>
-          <div class="rule-name">Container Size Mismatch (CLS)</div>
-          <div class="rule-evidence">Container height differs from creative by > 2px, or container lacks reserved height (<code>reservedHeight: false</code>).</div>
+          <div class="rule-name">Insufficient Reservation or Creative Overflow</div>
+          <div class="rule-evidence">Explicit slot or nearby wrapper reservation is smaller than the creative, or the creative overflows its box. No measured CLS claim.</div>
           <div class="rule-fix">Reserve container min-height per breakpoint via CSS (CLS prevention).</div>
         </div>
 
@@ -1177,9 +1177,9 @@ codex</code></pre>
             <span class="rule-id">R06</span>
             <span class="badge-sev low">Low</span>
           </div>
-          <div class="rule-name">Single Request Architecture Off</div>
-          <div class="rule-evidence">Multiple display ad requests fired independently without SRA batching (<code>iu_parts</code>). Video excluded.</div>
-          <div class="rule-fix">Call <code>googletag.pubads().enableSingleRequest()</code> before enableServices.</div>
+          <div class="rule-name">Multi-slot Batching Not Observed</div>
+          <div class="rule-evidence">Distinct slots were requested individually. Compressed one-slot calls and repeat refreshes do not prove SRA configuration.</div>
+          <div class="rule-fix">Review batching opportunities while preserving intentional lazy loading and refresh.</div>
         </div>
 
         <!-- R07 -->
@@ -1211,8 +1211,8 @@ codex</code></pre>
             <span class="badge-sev high">High</span>
           </div>
           <div class="rule-name">Consent Mismatch (GDPR / TCF)</div>
-          <div class="rule-evidence"><code>gdpr=1</code> with empty TC string, or no <code>__tcfapi</code>, or Purpose 1 denied while omitting npa=1/ltd=1.</div>
-          <div class="rule-fix">Ensure CMP passes valid TC string before GPT calls; set npa=1/ltd=1.</div>
+          <div class="rule-evidence"><code>gdpr=1</code> with empty TC string or explicitly missing TCF API; signal contradictions need review. Absent privacy flags alone do not prove a violation.</div>
+          <div class="rule-fix">Verify CMP signals and request timing; GPT can apply limited ads automatically.</div>
         </div>
 
         <!-- R10 -->

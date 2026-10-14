@@ -15,7 +15,7 @@ Agent (reads SKILL.md, orchestrates) → Chrome DevTools MCP (local `npx` proces
 ## Conventions
 
 - Node 22, ESM (`"type": "module"`), no runtime dependencies. CLIs under `skills/gpt-audit/scripts/`, one rule per file under `scripts/rules/`, tests under `scripts/tests/*.test.js` (`npm test`).
-- `collect-gpt.js`: one self-contained async function `collectGpt(opts)`, no imports, under 10 KB, every field in try/catch, never throws.
+- `collect-gpt.js`: one self-contained async function `collectGpt(opts)`, no imports, under 12 KB (the Phase 1 and test budget), every field in try/catch, never throws.
 - Output in `out/<host>/` (git-ignored). Report format and rule ids are fixed in `docs/PLAN.md` (Phase 2) and `skills/gpt-audit/references/anomaly-catalog.md`.
 - The three manifests (`plugin.json`, `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`) and the two MCP configs (`mcp_config.json`, `.mcp.json`) are final; change them only if a plugin validation fails, and say why.
 - Commit at the end of each phase with the message the plan gives.

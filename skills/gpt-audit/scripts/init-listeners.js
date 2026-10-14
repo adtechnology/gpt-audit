@@ -1,12 +1,10 @@
-// init-listeners.js — attaches GPT event listeners before page scripts run.
-// Used as initScript in navigate_page so initial-load events land in window.__gptAudit.events.
-
-(function () {
-  window.__gptAudit = window.__gptAudit || { events: [], listenersAttached: true };
+(function (fromNavigation) {
+  window.__gptAudit = window.__gptAudit || { events: [], listenersAttached: false };
   window.googletag = window.googletag || {};
   window.googletag.cmd = window.googletag.cmd || [];
 
   window.googletag.cmd.push(function () {
+    if (window.__gptAudit.listenersAttached) return;
     try {
       const pubads = window.googletag.pubads();
       const eventNames = [
@@ -40,8 +38,10 @@
           } catch (_) {}
         });
       });
+      window.__gptAudit.listenersAttached = true;
+      window.__gptAudit.listenersFromNavigation = fromNavigation;
     } catch (e) {
       window.__gptAudit.events.push({ name: 'listenerError', error: e.message });
     }
   });
-})();
+})(window.__gptAuditFromNavigation === true);

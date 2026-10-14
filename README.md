@@ -88,7 +88,7 @@ To compare multiple URLs (or staging vs production):
 
 > *"Audit the GPT setup on https://site-a.com and https://site-b.com, compare them, and write reports to out/"*
 
-In addition to individual reports, the agent outputs `out/comparison.md` summarizing slots, requests, SRA, Prebid version, consent signals, unfilled slots, and anomaly counts in a single table.
+In addition to individual reports, the agent outputs `out/comparison.md` summarizing slots, requests, configured SRA, observed batching, Prebid version, consent signals, unfilled slots, and anomaly counts in a single table.
 
 ### Standalone CLI Pipeline (CI / Headless)
 You can also run the deterministic analysis pipeline without an interactive agent:
@@ -175,10 +175,18 @@ GAM was reached only through ad-server passback creatives:
   and no longer needs a viewport width to run.
 - Multi-URL comparison report fixed.
 
+## Audit evidence corrections
+
+- The collector records active viewport sizes, nearby CSS reservations, capture-time viewport position, and targeting keys beyond the previous 20-key limit, including header-bidding and position keys. Capture/truncation limits are explicit.
+- R05 distinguishes insufficient reservation and creative overflow from intentional larger containers; it does not claim measured CLS. R06 distinguishes compressed request transport, actual multi-slot batching, and configured SRA.
+- Reports keep absent privacy flags and unavailable HTTP statuses unknown, show unverified fill as unknown, preserve request timing/batching fields, and withhold a numerical health score. Comparisons use the same evidence.
+- TCF checks do not equate absent NPA/LTD parameters with a Purpose 1 violation. A final CMP dialog snapshot does not establish when earlier requests were sent.
+- The skill verifies consent acceptance and scrolling progress. Optional [BrowserOS capture](skills/gpt-audit/references/browseros-capture.md) preserves partial initial coverage and supports saved Resource Timing input.
+
 ## Development & Testing
 
 ```bash
-# Run unit test suite (26 tests)
+# Run the regression test suite
 npm test
 
 # Syntax-check all Node scripts

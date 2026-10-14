@@ -137,3 +137,27 @@ test('extractNetworkData: filters ad requests and libraries correctly from JSON 
   assert.equal(result.libraries[0].name, 'gpt.js');
   assert.equal(result.libraries[1].name, 'pubads_impl');
 });
+
+test('compressed single-slot calls remain distinct from multi-slot batching', () => {
+  const one = parseAdRequestUrl('https://securepubads.g.doubleclick.net/gampad/ads?iu_parts=123,home&enc_prev_ius=/0/1&dids=header&prev_iu_szs=728x90|970x90|970x250');
+  assert.equal(one.isSra, true, 'legacy transport flag remains compatible');
+  assert.equal(one.slotCount, 1);
+  assert.equal(one.isBatched, false);
+  const two = parseAdRequestUrl('https://securepubads.g.doubleclick.net/gampad/ads?iu_parts=123,home&enc_prev_ius=/0/1,/0/1&dids=header,inline');
+  assert.equal(two.slotCount, 2);
+  assert.equal(two.isBatched, true);
+  const unknown = parseAdRequestUrl('https://securepubads.g.doubleclick.net/gampad/ads?prev_iu_szs=728x90|970x250');
+  assert.equal(unknown.slotCount, null);
+  assert.equal(unknown.isBatched, null);
+});
+
+test('missing or opaque HTTP status is never synthesized as a success', () => {
+  const url = 'https://securepubads.g.doubleclick.net/gampad/ads?iu=/123/home';
+  const raw = `## Request ${url}\n### Request Headers\n- referer:https://example.test/\nreqid=2 GET ${url}&dids=inline [pending]\n`;
+  assert.deepEqual(extractNetworkData(raw).requests.map(r => r.status), [null, null]);
+  const input = { requests: [{ url, responseStatus: 0 }, { url: `${url}&dids=inline`, responseStatus: 200 }], capture: { method: 'resource-timing', headersCaptured: false } };
+  const parsed = extractNetworkData(JSON.stringify(input));
+  assert.deepEqual(parsed.requests.map(r => r.status), [null, 200]);
+  assert.deepEqual(parsed.capture, input.capture);
+  assert.equal(parsed.requests[0].npa, null);
+});

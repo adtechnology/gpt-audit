@@ -31,7 +31,7 @@ Audit the GPT setup on https://www.telegraph.co.uk/ and https://edition.cnn.com/
 
 *What the agent returns:*
 - Individual report headers for each URL.
-- The consolidated comparison matrix from `out/comparison.md` comparing slots, ad requests, SRA status, Prebid version, consent signals, unfilled slots, and anomaly counts.
+- The consolidated comparison matrix from `out/comparison.md` comparing slots, ad requests, configured SRA, observed batching, Prebid version, consent signals, unfilled slots, and anomaly counts.
 
 ---
 
@@ -115,7 +115,7 @@ out/
     ├── findings.json                  # Output of rules R01-R10, R16-R18 (id, severity, slot, evidence, fix)
     ├── report.md                      # Human-readable Markdown audit report
     ├── report.json                    # Machine-readable JSON summary for CI/CD
-    ├── report.html                    # Interactive visual HTML report with Hero, KPIs & health score
+    ├── report.html                    # Interactive visual HTML report with session KPIs and explicit coverage limits
     ├── page.png                       # Initial viewport screenshot
     └── console.png                    # Google Publisher Console screenshot
 ```
@@ -125,10 +125,11 @@ out/
 ## 6. Understanding the Report
 
 ### Slot Table & Fill Types
-The Slot Table in `report.md` classifies ad fills into three clear categories:
+The Slot Table in `report.md` classifies ad fills into observed categories:
 - **Direct Line Item**: Filled by standard direct or sponsorship line items (displays numerical `lineItemId` and `creativeId`).
 - **AdX / Open Bidding**: Programmatic Google Ad Exchange or Open Bidding fill. Displayed as `AdX/OB (<sourceAgnosticLineItemId>)` when `lineItemId` is null and `isBackfill: true`.
-- **Unfilled**: Slot requested but no ad was returned (displays `unfilled`).
+- **Unfilled**: A captured render event explicitly reports an empty slot.
+- **Unknown**: No render or response evidence establishes fill.
 
 ### Findings Grouped by Severity
 - **High Severity**: Critical errors that prevent monetization, break user tracking, or violate privacy:
@@ -139,11 +140,11 @@ The Slot Table in `report.md` classifies ad fills into three clear categories:
   - `[R09]` GDPR consent mismatch or missing TC string.
 - **Medium Severity**: Suboptimal setup, potential CLS, or unfilled inventory:
   - `[R03]` Unfilled ad slot.
-  - `[R04]` No requested size fits the current viewport.
-  - `[R05]` Container size differs from creative or missing `reservedHeight` (CLS risk).
+  - `[R04]` No active mapped size fits the viewport or container.
+  - `[R05]` Insufficient explicit slot/wrapper reservation or creative overflow; a risk, not measured CLS.
   - `[R10]` Legacy host (`googletagservices.com`) or duplicate gpt.js tags.
 - **Low Severity**: Architecture recommendations:
-  - `[R06]` Single Request Architecture (SRA) disabled.
+  - `[R06]` Multi-slot batching not observed; separate lazy or refresh requests may be intentional.
 - **Publisher Compliance (High / Medium)**:
   - `[R16]` Publisher mandatory parameter missing (e.g. PPID omitted, required page targeting absent, required custom parameters missing in `cust_params`).
 

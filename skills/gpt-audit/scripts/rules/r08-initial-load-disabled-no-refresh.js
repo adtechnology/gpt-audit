@@ -2,7 +2,10 @@
 // Severity: High
 // Evidence: initialLoadDisabled true, zero gampad/ads display rows, no slotRequested events
 
+import { initialRequestsMayBeMissing } from '../capture.js';
+
 export default function r08InitialLoadDisabledNoRefresh(snapshot, network) {
+  if (initialRequestsMayBeMissing(snapshot, network)) return [];
   const findings = [];
   const initialLoadDisabled = snapshot?.gpt?.initialLoadDisabled === true;
 

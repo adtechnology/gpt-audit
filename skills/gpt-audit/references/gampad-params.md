@@ -7,10 +7,10 @@ Ad requests go to `https://securepubads.g.doubleclick.net/gampad/ads?...` (older
 | --- | --- | --- |
 | `output` | Output response format: `vast*` or `xml_vast*` indicates video; `ldjh` or default indicates display | Kind classification (`video` vs `display`), R06, R07 |
 | `iu` | Ad unit path of the slot (non-SRA request) | Slot matching, R01, R06 |
-| `iu_parts`, `enc_prev_ius` | SRA request: ad unit path parts and encoded path per slot | SRA detection, slot matching, R06 |
+| `iu_parts`, `enc_prev_ius` | Compressed ad unit path parts and encoded path per slot; may contain only one slot | Transport evidence, slot matching, batching detection |
 | `dids` | Comma-separated slot DOM element IDs included in request | Slot matching, R01 |
 | `sz` | Requested sizes of the slot, e.g. `300x250\|300x600` (non-SRA) | R04, slot table |
-| `prev_iu_szs` | SRA: requested sizes per slot, slots separated by `\|`, sizes by `,` | R04, slot table |
+| `prev_iu_szs` | Compressed size data; delimiters alone do not reliably establish slot count | R04, slot table |
 | `cust_params` | URL-encoded page-level key-values (`k=v&k2=v2`) | Targeting analysis, R13 |
 | `scp` | URL-encoded slot-level key-values (SRA) | Slot targeting, R13, R14 (`hb_*`) |
 | `correlator` | Page-view ID shared by all requests of one page load | R07 (mixed correlators) |
@@ -49,3 +49,9 @@ Ad requests go to `https://securepubads.g.doubleclick.net/gampad/ads?...` (older
 | response header `content-length`, `date` | `fill.contentLength`, `fill.date` | size of the response (an empty ldjh response is ~1–2 KB, a filled one tens of KB) and the server time |
 
 `fill` is `null` for rows that came from a list line without a `get_network_request` block.
+
+## Evidence semantics
+
+`isSra` preserves the historical compressed-transport flag. `slotCount` and `isBatched` describe observed request identities; conflicting or missing identity evidence stays `null`. `meta.batching` summarizes actual multi-slot requests separately from configured SRA.
+
+Missing HTTP status is `null`; Resource Timing status `0` is also unknown. Missing privacy parameters are `null`, not explicit `0`. Optional `capture` metadata is preserved from JSON input and appears in reports.

@@ -2,6 +2,11 @@
 
 Oct 14, 2026 · @Carlos Bracho
 
+This file records the original hackathon build plan. For the current capture procedure and implemented
+evidence criteria, use [SKILL.md](../skills/gpt-audit/SKILL.md) and the
+[anomaly catalog](../skills/gpt-audit/references/anomaly-catalog.md). In particular, the original
+reservation, SRA, privacy and absence heuristics below have been replaced with capture-aware checks.
+
 ## Goal and pitch
 
 One repo that installs as a plugin in Antigravity, Claude Code and OpenAI Codex and, given a URL, audits the Google Publisher Tag (GPT) setup on that page: it opens the page in a real Chrome through Chrome DevTools for agents (`chrome-devtools-mcp`), reads the live `googletag` state and every Ad Manager ad request, runs a fixed set of anomaly rules and writes a report of all slots plus the findings.

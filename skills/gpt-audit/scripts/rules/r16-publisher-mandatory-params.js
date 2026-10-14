@@ -3,6 +3,9 @@
 // Evidence: Snapshot or ad requests lack parameters specified in publisher config
 //           (e.g., PPID, cust_params, gpt.pageTargeting, slot targeting, required slots)
 
+import { getSingleRequestConfig } from '../batching.js';
+import { initialRequestsMayBeMissing } from '../capture.js';
+
 export function normalizeConfig(rawConfig = {}) {
   if (!rawConfig || typeof rawConfig !== 'object') {
     return null;
@@ -71,6 +74,7 @@ export function evaluateCompliance(snapshot, network, rawConfig) {
       active: false,
       publisher: null,
       passed: true,
+      status: 'not_configured',
       checks: [],
       findings: []
     };
@@ -82,6 +86,7 @@ export function evaluateCompliance(snapshot, network, rawConfig) {
   const slots = snapshot?.slots || [];
   const requests = network?.requests || [];
   const displayRequests = requests.filter(r => (r.kind || 'display') === 'display');
+  const initialRequestsUnverified = displayRequests.length === 0 && initialRequestsMayBeMissing(snapshot, network);
 
   // 1. PPID Check
   if (config.ppid) {
@@ -90,14 +95,16 @@ export function evaluateCompliance(snapshot, network, rawConfig) {
         name: 'PPID (Publisher Provided Identifier)',
         type: 'Ad Request',
         required: true,
-        passed: false,
-        details: 'No display ad requests were dispatched to check for PPID'
+        passed: initialRequestsUnverified ? null : false,
+        details: initialRequestsUnverified
+          ? 'No display ad requests were captured in the partial initial network log; earlier calls may be missing, so PPID is unverified'
+          : 'No display ad requests were captured to check for PPID'
       });
-      findings.push({
+      if (!initialRequestsUnverified) findings.push({
         id: 'R16',
         severity: 'high',
         slot: null,
-        evidence: 'Mandatory PPID check failed: no display ad requests were dispatched',
+        evidence: 'Mandatory PPID check failed: no display ad requests were captured',
         fix: 'Ensure googletag.pubads().setPublisherProvidedId(...) is configured and ad requests are sent'
       });
     } else {
@@ -132,10 +139,12 @@ export function evaluateCompliance(snapshot, network, rawConfig) {
         name: `cust_params: '${key}'`,
         type: 'Ad Request',
         required: true,
-        passed: false,
-        details: 'No display ad requests dispatched'
+        passed: initialRequestsUnverified ? null : false,
+        details: initialRequestsUnverified
+          ? 'No display ad requests were captured in the partial initial network log; earlier calls may be missing, so custom parameters are unverified'
+          : 'No display ad requests captured'
       });
-      findings.push({
+      if (!initialRequestsUnverified) findings.push({
         id: 'R16',
         severity: 'high',
         slot: null,
@@ -296,31 +305,34 @@ export function evaluateCompliance(snapshot, network, rawConfig) {
 
   // 8. SRA Policy
   if (config.requireSra) {
-    const isSra = displayRequests.some(r => r.isSra === true);
-    const passed = isSra || displayRequests.length <= 1;
+    const passed = getSingleRequestConfig(snapshot);
     checks.push({
       name: 'Single Request Architecture (SRA)',
       type: 'Architecture',
       required: true,
       passed,
-      details: passed ? 'SRA batching verified' : 'Display requests dispatched individually without SRA batching'
+      details: passed === true ? 'singleRequest is explicitly configured as true'
+        : passed === false ? 'singleRequest is explicitly configured as false'
+        : 'singleRequest configuration is unavailable; compressed transport or observed batching does not verify configured SRA'
     });
 
-    if (!passed) {
+    if (passed === false) {
       findings.push({
         id: 'R16',
         severity: 'medium',
         slot: null,
-        evidence: 'Publisher configuration mandates Single Request Architecture, but display requests were not batched with SRA',
-        fix: 'Call googletag.pubads().enableSingleRequest() before googletag.enableServices()'
+        evidence: 'Publisher configuration mandates Single Request Architecture, but singleRequest is explicitly configured as false',
+        fix: 'Call googletag.setConfig({ singleRequest: true }) before googletag.enableServices()'
       });
     }
   }
 
+  const passed = checks.some(check => check.passed === false) ? false : checks.some(check => check.passed === null) ? null : true;
   return {
     active: true,
     publisher: config.publisher,
-    passed: findings.length === 0,
+    passed,
+    status: passed === null ? 'incomplete' : passed ? 'compliant' : 'non-compliant',
     checks,
     findings
   };

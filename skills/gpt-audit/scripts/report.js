@@ -13,6 +13,58 @@ import { dirname, join } from 'node:path';
 import { evaluateCompliance } from './rules/r16-publisher-mandatory-params.js';
 import { analyzeTcf } from './tcf.js';
 import { renderHtmlReport } from './report-html.js';
+import { getSingleRequestConfig, summarizeBatching } from './batching.js';
+
+const booleanLabel = value => value === true ? 'on' : value === false ? 'off' : 'unknown';
+const observedLabel = value => value === true ? 'yes' : value === false ? 'no' : 'unknown';
+const complianceLabel = passed => passed === true ? 'COMPLIANT ✅' : passed === false ? 'NON-COMPLIANT ❌' : 'INCOMPLETE — unverified requirements';
+const privacyKeys = ['gdpr', 'gdpr_consent', 'npa', 'ltd', 'rdp'];
+const parameterPresent = (request, key) => {
+  if (typeof request.parameterPresence?.[key] === 'boolean') return request.parameterPresence[key];
+  if (request.raw && typeof request.raw === 'object') return Object.hasOwn(request.raw, key);
+  return request[key] !== undefined && request[key] !== null;
+};
+const parameterValue = (request, key) => request[key] ?? request.raw?.[key] ?? null;
+const privacyLabel = (value, present) => present === false ? 'absent' : value === null || value === undefined ? 'unknown' : value === '' ? 'empty' : String(value);
+
+function summarizePrivacy(requests, key) {
+  const presentRequests = requests.filter(r => parameterPresent(r, key));
+  const values = [...new Set(presentRequests.map(r => parameterValue(r, key)).filter(v => v !== null).map(String))];
+  const value = values.length === 1 ? values[0] : null;
+  return {
+    value,
+    present: requests.length ? presentRequests.length > 0 : null,
+    state: values.length > 1 ? 'mixed' : presentRequests.length ? privacyLabel(value, true) : requests.length ? 'absent' : 'unknown'
+  };
+}
+
+function captureNotes(meta) {
+  const capture = meta.capture || {};
+  const initialEvents = ['partial', 'from-navigation'].includes(capture.initialEvents) ? capture.initialEvents : 'unknown';
+  const consentAction = capture.consentAction || 'unknown';
+  const notes = [
+    'Scope: one captured page session; findings describe the observed state and requests.',
+    `Initial event coverage: ${initialEvents === 'from-navigation' ? 'listeners attached from navigation' : initialEvents === 'partial' ? 'partial; earlier events may be missing' : 'unknown'}. Consent action: ${consentAction}.`
+  ];
+  if (meta.viewport?.w && meta.viewport?.h) {
+    const scroll = capture.scrollPosition;
+    notes.push(`Viewport at capture: ${meta.viewport.w}×${meta.viewport.h}${scroll ? `; scroll position ${scroll.x ?? 'unknown'}, ${scroll.y ?? 'unknown'}` : ''}.`);
+  }
+  return { capture: { ...capture, initialEvents, consentAction }, notes };
+}
+
+function slotFillStatus(slot) {
+  if (slot.render?.isEmpty === true) return 'unfilled';
+  if (slot.render?.isEmpty === false) return 'filled';
+  return 'unknown';
+}
+
+function slotFillType(slot) {
+  if (slotFillStatus(slot) === 'unfilled') return 'Unfilled';
+  if (slot.render?.isBackfill === true) return slot.render?.lineItemId == null ? 'AdX / Open Bidding' : 'AdX / Backfill';
+  if (slot.render?.isEmpty === false && slot.render?.isBackfill === false) return 'Standard Line Item';
+  return 'Unknown';
+}
 
 export function renderReport(snapshot, network, findings = [], options = {}) {
   const meta = snapshot?.meta || {};
@@ -45,29 +97,41 @@ export function renderReport(snapshot, network, findings = [], options = {}) {
   const lowFindings = findings.filter(f => f.severity?.toLowerCase() === 'low');
 
   // Consent summary
-  const gdprParam = requests.find(r => r.gdpr !== undefined)?.gdpr ?? (neighbours.consent?.tcf?.gdprApplies ? '1' : '0');
-  const tcStringLen = tcfAnalysis.tcStringLength || (requests.find(r => r.gdpr_consent !== undefined)?.gdpr_consent ?? neighbours.consent?.tcf?.tcStringLength ?? 0);
-  const npaParam = requests.find(r => r.npa !== undefined)?.npa ?? '0';
+  const gdprSignal = summarizePrivacy(requests, 'gdpr');
+  const npaSignal = summarizePrivacy(requests, 'npa');
+  const tcSignal = summarizePrivacy(requests, 'gdpr_consent');
+  const gdprFromApi = typeof neighbours.consent?.tcf?.gdprApplies === 'boolean' ? (neighbours.consent.tcf.gdprApplies ? '1' : '0') : null;
+  const gdprParam = gdprSignal.present === true ? gdprSignal.value : gdprFromApi;
+  const tcStringKnown = requests.length > 0 || tcfAnalysis.apiPresent || neighbours.consent?.tcf?.tcStringLength !== undefined || Boolean(tcfAnalysis.tcString);
+  const tcStringLen = tcStringKnown ? tcfAnalysis.tcStringLength : null;
+  const coverage = captureNotes(meta);
+  const networkCapture = network?.capture || null;
+  if (networkCapture) {
+    coverage.notes.push(`Network capture: ${networkCapture.method || 'unspecified'}; initial coverage: ${networkCapture.initialCoverage || 'unknown'}; headers: ${networkCapture.headersCaptured === true ? 'captured' : networkCapture.headersCaptured === false ? 'not captured' : 'unknown'}; bodies: ${networkCapture.bodiesCaptured === true ? 'captured' : networkCapture.bodiesCaptured === false ? 'not captured' : 'unknown'}.`);
+  }
 
   const consentSummary = {
     gdpr: gdprParam,
-    tcStringPresent: tcStringLen > 0,
+    gdprParamPresent: gdprSignal.present,
+    gdprState: gdprParam === null ? gdprSignal.state : gdprParam,
+    gdprSource: gdprSignal.present === true ? 'network' : gdprFromApi !== null ? '__tcfapi' : 'none',
+    tcStringPresent: tcStringLen === null ? null : tcStringLen > 0,
     tcStringLength: tcStringLen,
+    tcStringParamPresent: tcSignal.present,
     tcString: tcfAnalysis.tcString || null,
     tcfStatus: tcfAnalysis.status,
     cmpId: tcfAnalysis.cmpId,
-    npa: npaParam === '1',
+    npa: npaSignal.value === '1' ? true : npaSignal.value === '0' ? false : null,
+    npaParamPresent: npaSignal.present,
+    npaState: npaSignal.state,
     purposeConsents: Object.fromEntries(tcfAnalysis.purposes.map(p => [p.id, p.consent])),
     purposeLegitimateInterests: Object.fromEntries(tcfAnalysis.purposes.map(p => [p.id, p.legitimateInterest]))
   };
 
-  const displayRequests = requests.filter(r => (r.kind || 'display') === 'display');
-  const sraEnabled = Boolean(
-    gpt.config?.singleRequest === true ||
-    displayRequests.some(r => r.isSra === true || Boolean(r.iu_parts || r.enc_prev_ius || r.prev_iu_szs))
-  );
-  const lazyLoadEnabled = Boolean(gpt.config?.lazyLoad);
-  const initialLoadDisabled = Boolean(gpt.initialLoadDisabled);
+  const sraEnabled = getSingleRequestConfig(snapshot);
+  const batching = summarizeBatching(network);
+  const lazyLoadEnabled = gpt.config?.lazyLoad === undefined ? null : Boolean(gpt.config.lazyLoad);
+  const initialLoadDisabled = typeof gpt.initialLoadDisabled === 'boolean' ? gpt.initialLoadDisabled : null;
 
   // Build JSON report
   const jsonReport = {
@@ -83,8 +147,14 @@ export function renderReport(snapshot, network, findings = [], options = {}) {
       gptInstances,
       requestCount: requests.length,
       sra: sraEnabled,
+      batching,
       lazyLoad: lazyLoadEnabled,
       initialLoadDisabled,
+      prebidVersion: neighbours.prebid?.version || null,
+      viewport: meta.viewport || null,
+      capture: coverage.capture,
+      networkCapture,
+      scopeNotes: coverage.notes,
       consent: consentSummary
     },
     tcf: tcfAnalysis,
@@ -129,13 +199,17 @@ export function renderReport(snapshot, network, findings = [], options = {}) {
         elementId: s.elementId || '',
         adUnitPath: s.adUnitPath || '',
         sizes: s.sizes || [],
+        viewportSizes: s.viewportSizes || null,
         renderedSize: s.render?.size || (s.iframe?.w && s.iframe?.h ? [s.iframe.w, s.iframe.h] : null),
         lineItemId: lineItemLabel,
         creativeId: s.render?.creativeId ?? s.response?.creativeId ?? null,
         advertiserId: s.render?.advertiserId ?? s.response?.advertiserId ?? null,
         campaignId: s.render?.campaignId ?? s.response?.campaignId ?? null,
         safeFrame: s.iframe?.safeFrame ?? false,
-        inViewportOnLoad: s.dom?.inViewportOnLoad ?? false,
+        inViewportAtCapture: Object.hasOwn(s.dom || {}, 'inViewportAtCapture') ? s.dom.inViewportAtCapture : s.dom?.inViewportOnLoad ?? null,
+        inViewportOnLoad: s.dom?.inViewportOnLoad ?? null,
+        fillStatus: slotFillStatus(s),
+        fillType: slotFillType(s),
         render: s.render || null,
         targetingKeys: Object.keys(s.targeting || {}),
         frame: s.frame || null
@@ -143,17 +217,25 @@ export function renderReport(snapshot, network, findings = [], options = {}) {
     }),
     requests: requests.map(r => ({
       kind: r.kind || 'display',
-      isSra: Boolean(r.isSra || r.iu_parts || r.enc_prev_ius || r.prev_iu_szs),
+      isSra: typeof r.isSra === 'boolean' ? r.isSra : null,
+      isBatched: typeof r.isBatched === 'boolean' ? r.isBatched : null,
+      slotCount: r.slotCount ?? null,
+      iu_parts: r.iu_parts ?? null,
+      enc_prev_ius: r.enc_prev_ius ?? null,
+      dids: r.dids ?? null,
+      prev_iu_szs: r.prev_iu_szs ?? null,
+      startTime: r.startTime ?? null,
       correlator: r.correlator || null,
       adUnits: r.adUnits || (r.iu ? [r.iu] : []),
-      status: r.status ?? 200,
+      status: r.status ?? null,
       duration: r.duration ?? null,
-      gdpr: r.gdpr || null,
-      gdpr_consent_length: r.gdpr_consent || 0,
+      gdpr: parameterValue(r, 'gdpr'),
+      gdpr_consent_length: r.gdpr_consent ?? (typeof r.raw?.gdpr_consent === 'string' ? r.raw.gdpr_consent.length : null),
       tcString: r.tcString || null,
-      npa: r.npa || null,
-      ltd: r.ltd || null,
-      rdp: r.rdp || null,
+      npa: parameterValue(r, 'npa'),
+      ltd: parameterValue(r, 'ltd'),
+      rdp: parameterValue(r, 'rdp'),
+      parameterPresence: Object.fromEntries(privacyKeys.map(key => [key, parameterPresent(r, key)])),
       ppid: r.ppid || false,
       pvsid: r.pvsid || null,
       fill: r.fill || null
@@ -172,25 +254,27 @@ export function renderReport(snapshot, network, findings = [], options = {}) {
   lines.push(`- **GPT Version**: \`${gpt.version || 'not loaded'}\``);
   lines.push(`- **Slots Defined**: ${slots.length}${frames.length ? ` (${mainSlotCount} in the main frame, ${frameSlotCount} in ${frames.length} iframe GPT instance(s))` : ''}`);
   lines.push(`- **GPT Instances**: ${gptInstances}${frames.length ? ` (1 main frame + ${frames.length} same-origin iframes)` : ''}`);
-  lines.push(`- **Ad Requests (GAM)**: ${requests.length} (${requests.filter(r => r.kind === 'display').length} display, ${requests.filter(r => r.kind === 'video').length} video)`);
-  lines.push(`- **Consent State**: GDPR: \`${consentSummary.gdpr}\` | TC String: \`${consentSummary.tcStringPresent ? `present (${consentSummary.tcStringLength} chars)` : 'absent'}\` | NPA: \`${consentSummary.npa ? '1' : '0'}\` | TCF Status: \`${tcfAnalysis.status}\``);
+  lines.push(`- **Ad Requests (GAM)**: ${requests.length} (${batching.displayRequestCount} display, ${requests.filter(r => r.kind === 'video').length} video)`);
+  lines.push(`- **Request Architecture**: Configured SRA: \`${booleanLabel(sraEnabled)}\` | Observed multi-slot batching: \`${observedLabel(batching.observed)}\` (${batching.batchedRequestCount} request(s)) | Transport-compressed requests: ${batching.transportCompressedRequestCount}`);
+  lines.push(`- **Consent State**: GDPR: \`${consentSummary.gdprState}\` | TC String: \`${consentSummary.tcStringPresent === null ? 'unknown' : consentSummary.tcStringPresent ? `present (${consentSummary.tcStringLength} chars)` : 'absent'}\` | NPA parameter: \`${consentSummary.npaState}\` | TCF Status: \`${tcfAnalysis.status}\``);
   if (compliance.active) {
-    const failedChecks = compliance.checks.filter(c => !c.passed).length;
-    lines.push(`- **Publisher Compliance**: **${compliance.publisher}** — **${compliance.passed ? 'COMPLIANT ✅' : `NON-COMPLIANT ❌ (${failedChecks} requirement(s) failed)`}**`);
+    const failedChecks = compliance.checks.filter(c => c.passed === false).length;
+    lines.push(`- **Publisher Compliance**: **${compliance.publisher}** — **${complianceLabel(compliance.passed)}${compliance.passed === false ? ` (${failedChecks} requirement(s) failed)` : ''}**`);
   }
   lines.push(`- **Findings Summary**: **High**: ${highFindings.length} | **Medium**: ${medFindings.length} | **Low**: ${lowFindings.length} (Total: ${findings.length})`);
+  for (const note of coverage.notes) lines.push(`- ${note}`);
   lines.push('');
 
   // 2. Publisher Mandatory Parameters (if configured)
   if (compliance.active) {
     lines.push('## 2. Publisher Mandatory Parameters (Compliance)');
     lines.push('');
-    lines.push(`Configuration Profile: **${compliance.publisher}** | Status: **${compliance.passed ? 'COMPLIANT ✅' : 'NON-COMPLIANT ❌'}**`);
+    lines.push(`Configuration Profile: **${compliance.publisher}** | Status: **${complianceLabel(compliance.passed)}**`);
     lines.push('');
     lines.push('| Requirement | Category | Status | Verification Evidence / Details |');
     lines.push('| :--- | :--- | :--- | :--- |');
     for (const c of compliance.checks) {
-      const statusIcon = c.passed ? '✅ Passed' : '❌ **Failed**';
+      const statusIcon = c.passed === true ? '✅ Passed' : c.passed === false ? '❌ **Failed**' : '➖ Unknown';
       lines.push(`| \`${c.name}\` | ${c.type} | ${statusIcon} | ${c.details} |`);
     }
     lines.push('');
@@ -200,14 +284,14 @@ export function renderReport(snapshot, network, findings = [], options = {}) {
   const slotSectionNum = compliance.active ? '3' : '2';
   lines.push(`## ${slotSectionNum}. Slot Table`);
   lines.push('');
-  lines.push('| Element ID | Frame | Ad Unit Path | Requested Sizes | Rendered Size | Line Item ID | Creative ID | Advertiser ID | SafeFrame | In Viewport | Targeting Keys |');
+  lines.push('| Element ID | Frame | Ad Unit Path | Declared Sizes | Rendered Size | Line Item ID | Creative ID | Advertiser ID | SafeFrame | In Viewport at Capture | Targeting Keys |');
   lines.push('| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |');
 
   for (const slot of jsonReport.slots) {
     const szReq = (slot.sizes || []).map(s => Array.isArray(s) ? `${s[0]}×${s[1]}` : s).join(', ') || 'none';
     const szRend = Array.isArray(slot.renderedSize) ? `${slot.renderedSize[0]}×${slot.renderedSize[1]}` : (slot.renderedSize || 'none');
     const sf = slot.safeFrame ? 'yes' : 'no';
-    const vp = slot.inViewportOnLoad ? 'yes' : 'no';
+    const vp = slot.inViewportAtCapture === null ? 'unknown' : slot.inViewportAtCapture ? 'yes' : 'no';
     const tgKeys = (slot.targetingKeys || []).slice(0, 5).join(', ') + (slot.targetingKeys?.length > 5 ? '…' : '');
     const lineItem = slot.lineItemId !== null ? String(slot.lineItemId) : 'null';
     const creative = slot.creativeId !== null ? String(slot.creativeId) : 'null';
@@ -239,23 +323,18 @@ export function renderReport(snapshot, network, findings = [], options = {}) {
   for (const slot of jsonReport.slots) {
     const r = slot.render;
     if (!r) {
-      lines.push(`| \`${slot.elementId}\` | _no render event_ | - | - | - | - | - | - | - |`);
+      lines.push(`| \`${slot.elementId}\` | _no render event_ | - | - | - | - | - | - | **Unknown** |`);
       continue;
     }
-    const emptyStr = r.isEmpty ? 'true' : 'false';
+    const emptyStr = typeof r.isEmpty === 'boolean' ? String(r.isEmpty) : 'unknown';
     const szStr = Array.isArray(r.size) ? `${r.size[0]}×${r.size[1]}` : (r.size || 'none');
-    const backfillStr = r.isBackfill ? 'true' : 'false';
-    const liStr = r.lineItemId !== null ? String(r.lineItemId) : 'null';
-    const saLiStr = r.sourceAgnosticLineItemId !== null ? String(r.sourceAgnosticLineItemId) : 'null';
-    const crStr = r.creativeId !== null ? String(r.creativeId) : 'null';
+    const backfillStr = typeof r.isBackfill === 'boolean' ? String(r.isBackfill) : 'unknown';
+    const liStr = r.lineItemId != null ? String(r.lineItemId) : 'null';
+    const saLiStr = r.sourceAgnosticLineItemId != null ? String(r.sourceAgnosticLineItemId) : 'null';
+    const crStr = r.creativeId != null ? String(r.creativeId) : 'null';
     const ygStr = r.yieldGroupIds ? (Array.isArray(r.yieldGroupIds) ? r.yieldGroupIds.join(', ') : String(r.yieldGroupIds)) : 'none';
 
-    let fillType = 'Standard Line Item';
-    if (r.isEmpty) fillType = 'Unfilled';
-    else if (r.isBackfill && r.lineItemId === null) fillType = 'AdX / Open Bidding';
-    else if (r.isBackfill) fillType = 'AdX / Backfill';
-
-    lines.push(`| \`${slot.elementId}\` | ${emptyStr} | ${szStr} | ${backfillStr} | ${liStr} | ${saLiStr} | ${crStr} | ${ygStr} | **${fillType}** |`);
+    lines.push(`| \`${slot.elementId}\` | ${emptyStr} | ${szStr} | ${backfillStr} | ${liStr} | ${saLiStr} | ${crStr} | ${ygStr} | **${slot.fillType}** |`);
   }
   lines.push('');
 
@@ -292,17 +371,17 @@ export function renderReport(snapshot, network, findings = [], options = {}) {
   lines.push('| # | Kind | Correlator | PPID | Ad Units (Count) | Status | Duration | GDPR | Consent Present | Privacy Signals (npa/ltd/rdp) |');
   lines.push('| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |');
 
-  requests.forEach((req, idx) => {
+  jsonReport.requests.forEach((req, idx) => {
     const kind = req.kind || 'display';
     const corr = req.correlator || 'none';
     const ppidStr = req.ppid ? 'yes' : 'no';
     const auCount = req.adUnits?.length || (req.iu ? 1 : 0);
     const auSnippet = auCount > 0 ? (req.adUnits?.[0] ? `${req.adUnits[0]} (${auCount})` : `${auCount} unit(s)`) : 'none';
-    const status = req.status ?? 200;
+    const status = req.status ?? 'unknown';
     const dur = req.duration !== null && req.duration !== undefined ? `${Math.round(req.duration)} ms` : '-';
-    const gdpr = req.gdpr ?? '-';
-    const consent = (req.gdpr_consent && req.gdpr_consent > 0) ? `yes (${req.gdpr_consent} chars)` : 'no';
-    const priv = `npa:${req.npa ?? '0'}, ltd:${req.ltd ?? '0'}, rdp:${req.rdp ?? '0'}`;
+    const gdpr = privacyLabel(req.gdpr, req.parameterPresence.gdpr);
+    const consent = req.gdpr_consent_length > 0 ? `yes (${req.gdpr_consent_length} chars)` : req.parameterPresence.gdpr_consent === false ? 'absent' : req.gdpr_consent_length == null ? 'unknown' : 'empty';
+    const priv = ['npa', 'ltd', 'rdp'].map(key => `${key}:${privacyLabel(req[key], req.parameterPresence[key])}`).join(', ');
 
     lines.push(`| ${idx + 1} | \`${kind}\` | \`${corr}\` | ${ppidStr} | \`${auSnippet}\` | ${status} | ${dur} | ${gdpr} | ${consent} | \`${priv}\` |`);
   });
@@ -316,9 +395,9 @@ export function renderReport(snapshot, network, findings = [], options = {}) {
   // TCF v2 Consent & Purpose Analysis
   lines.push('### TCF v2 Consent & Purpose Analysis');
   lines.push('');
-  const statusBadge = tcfAnalysis.status === 'healthy' ? '✅ Healthy' : tcfAnalysis.status === 'error' ? '❌ Issues Detected' : '➖ Not Active';
+  const statusBadge = tcfAnalysis.status === 'healthy' ? '✅ Healthy' : tcfAnalysis.status === 'error' ? '❌ Issues Detected' : tcfAnalysis.status === 'incomplete' ? '➖ Incomplete' : tcfAnalysis.status === 'unknown' ? '➖ Unknown' : '➖ Not Active';
   lines.push(`- **TCF Status**: **${statusBadge}** — ${tcfAnalysis.statusSummary}`);
-  lines.push(`- **\`__tcfapi\` Present**: \`${tcfAnalysis.apiPresent ? 'true' : 'false'}\` | **GDPR Applies**: \`${tcfAnalysis.gdprApplies === null ? 'unknown' : String(tcfAnalysis.gdprApplies)}\``);
+  lines.push(`- **\`__tcfapi\` Present**: \`${tcfAnalysis.apiPresent === null ? 'unknown' : String(tcfAnalysis.apiPresent)}\` | **GDPR Applies**: \`${tcfAnalysis.gdprApplies === null ? 'unknown' : String(tcfAnalysis.gdprApplies)}\``);
   if (tcfAnalysis.cmpId !== null || tcfAnalysis.tcfPolicyVersion !== null || tcfAnalysis.eventStatus) {
     lines.push(`- **CMP Details**: CMP ID: \`${tcfAnalysis.cmpId ?? 'n/a'}\` | CMP Version: \`${tcfAnalysis.cmpVersion ?? 'n/a'}\` | Policy Version: \`${tcfAnalysis.tcfPolicyVersion ?? 'n/a'}\` | Event Status: \`${tcfAnalysis.eventStatus || 'n/a'}\` | Publisher CC: \`${tcfAnalysis.publisherCC || 'n/a'}\``);
   }
@@ -337,7 +416,7 @@ export function renderReport(snapshot, network, findings = [], options = {}) {
     lines.push('| Check | Status | Details |');
     lines.push('| :--- | :--- | :--- |');
     for (const c of tcfAnalysis.checks) {
-      lines.push(`| ${c.name} | ${c.passed ? '✅ Passed' : '❌ **Failed**'} | ${c.details} |`);
+      lines.push(`| ${c.name} | ${c.passed === null ? '➖ Unknown' : c.passed ? '✅ Passed' : '❌ **Failed**'} | ${c.details} |`);
     }
     lines.push('');
   }
@@ -402,8 +481,8 @@ export function renderComparison(reports) {
   const lines = [];
   lines.push('# GPT Audit — Multi-Host Comparison');
   lines.push('');
-  lines.push('| Host | GPT Version | Slots | Ad Requests | Compliance | SRA | Lazy Load | Initial Load | Prebid | Consent (GDPR/TC/NPA) | Unfilled Slots | Findings (H / M / L) |');
-  lines.push('| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |');
+  lines.push('| Host | GPT Version | Slots | Ad Requests | Compliance | Configured SRA | Observed Batching | Compressed Requests | Lazy Load | Initial Load | Prebid | Consent (GDPR/TC/NPA parameter) | Unfilled / Unknown Slots | Findings (H / M / L) |');
+  lines.push('| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |');
 
   for (const rep of reports) {
     const meta = rep.meta || {};
@@ -422,22 +501,25 @@ export function renderComparison(reports) {
     const slotCount = meta.slotCount ?? slots.length;
     const reqCount = meta.requestCount ?? requests.length;
 
-    const hasSra = typeof meta.sra === 'boolean' ? meta.sra : requests.some(r => r.isSra === true);
-    const sraStr = hasSra ? 'on' : 'off';
-    const lazyStr = meta.lazyLoad ? 'on' : 'off';
-    const initStr = meta.initialLoadDisabled ? 'disabled' : 'enabled';
-    const prebidVer = rep.prebid?.present ? (rep.prebid.version || 'present') : (rep.prebid?.version || 'none');
+    const batching = meta.batching || summarizeBatching({ requests });
+    const sraStr = booleanLabel(meta.sra);
+    const batchStr = observedLabel(batching.observed);
+    const lazyStr = booleanLabel(meta.lazyLoad);
+    const initStr = meta.initialLoadDisabled === true ? 'disabled' : meta.initialLoadDisabled === false ? 'enabled' : 'unknown';
+    const prebidVer = rep.prebid?.version || meta.prebidVersion || (rep.prebid?.present ? 'present' : 'none');
 
     let compStr = '-';
     if (compliance?.active) {
-      compStr = compliance.passed ? '✅ Pass' : `❌ ${compliance.checks.filter(c => !c.passed).length} issue(s)`;
+      compStr = compliance.passed === true ? '✅ Pass' : compliance.passed === false ? `❌ ${compliance.checks.filter(c => c.passed === false).length} issue(s)` : '➖ Incomplete';
     }
 
-    const consentStr = `${consent.gdpr ?? '-'}/${consent.tcStringPresent ? 'yes' : 'no'}/${consent.npa ? '1' : '0'}`;
+    const npaState = consent.npaState ?? (consent.npa === true ? '1' : consent.npa === false ? '0' : 'unknown');
+    const consentStr = `${consent.gdprState ?? consent.gdpr ?? 'unknown'}/${observedLabel(consent.tcStringPresent)}/${npaState}`;
     const unfilledCount = slots.filter(s => s.lineItemId === 'unfilled' || s.render?.isEmpty === true).length;
+    const unknownFillCount = slots.filter(s => s.fillStatus === 'unknown' || (s.fillStatus === undefined && typeof s.render?.isEmpty !== 'boolean')).length;
     const findingsStr = `${summary.high ?? 0}H / ${summary.medium ?? 0}M / ${summary.low ?? 0}L`;
 
-    lines.push(`| **${host}** | \`${gptVer}\` | ${slotCount} | ${reqCount} | ${compStr} | ${sraStr} | ${lazyStr} | ${initStr} | \`${prebidVer}\` | ${consentStr} | ${unfilledCount} | ${findingsStr} |`);
+    lines.push(`| **${host}** | \`${gptVer}\` | ${slotCount} | ${reqCount} | ${compStr} | ${sraStr} | ${batchStr} | ${batching.transportCompressedRequestCount} | ${lazyStr} | ${initStr} | \`${prebidVer}\` | ${consentStr} | ${unfilledCount} / ${unknownFillCount} | ${findingsStr} |`);
   }
 
   lines.push('');
