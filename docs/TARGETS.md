@@ -9,7 +9,7 @@ One URL per line. The agent audits each with one page load, accepts the CMP, nev
 
 ## Property I control
 
-- <add URL>
+- https://www.telegraph.co.uk/
 
 ## Foreign properties (variety: one with Prebid, one with SRA on, one with lazy loading)
 
