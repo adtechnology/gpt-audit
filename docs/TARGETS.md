@@ -13,6 +13,5 @@ One URL per line. The agent audits each with one page load, accepts the CMP, nev
 
 ## Foreign properties (variety: one with Prebid, one with SRA on, one with lazy loading)
 
-- <add URL>
-- <add URL>
-- <add URL>
+- https://www.telegraph.co.uk/
+- https://www.bild.de/
