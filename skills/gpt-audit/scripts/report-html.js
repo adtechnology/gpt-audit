@@ -1,5 +1,5 @@
 // report-html.js — Generates a modern, rich, interactive HTML audit report.
-// Features a high-impact Hero banner with health score gauge, KPI metric cards,
+// Features a Hero banner with evidence scope, KPI metric cards,
 // interactive filterable slot tables, ad request inspector, findings explorer with code fixes,
 // publisher compliance matrix, and visual screenshot embeds.
 
@@ -23,37 +23,8 @@ export function renderHtmlReport(snapshot, network, findings = [], jsonReport = 
   const consent = jsonReport?.meta?.consent || {};
   const tcf = jsonReport?.tcf || null;
 
-  // Calculate Health Score (0–100)
-  let healthScore = 100;
-  if (!gpt.present) {
-    healthScore = 0;
-  } else {
-    healthScore -= (summary.high * 15);
-    healthScore -= (summary.medium * 5);
-    healthScore -= (summary.low * 2);
-    if (compliance?.active && !compliance.passed) {
-      healthScore -= 10;
-    }
-  }
-  healthScore = Math.max(0, Math.min(100, healthScore));
-
-  let scoreColor = '#34d399'; // Emerald
-  let scoreLabel = 'Excellent Health';
-  let scoreClass = 'score-excellent';
-  if (healthScore < 60) {
-    scoreColor = '#f43f5e'; // Rose
-    scoreLabel = 'Critical Issues';
-    scoreClass = 'score-critical';
-  } else if (healthScore < 85) {
-    scoreColor = '#fbbf24'; // Amber
-    scoreLabel = 'Needs Attention';
-    scoreClass = 'score-warning';
-  }
-
-  // SVG Gauge calculations
+  // Keep the report's visual layout without inventing a quantitative quality score.
   const radius = 45;
-  const circumference = 2 * Math.PI * radius;
-  const strokeOffset = circumference - (healthScore / 100) * circumference;
 
   const url = meta.url || 'Unknown Target';
   let hostname = 'Target Property';
@@ -63,7 +34,12 @@ export function renderHtmlReport(snapshot, network, findings = [], jsonReport = 
   const displayRequests = requests.filter(r => r.kind === 'display');
   const videoRequests = requests.filter(r => r.kind === 'video');
   const ppidDetected = requests.some(r => r.ppid === true);
-  const sraActive = requests.some(r => r.isSra === true) || (displayRequests.length > 0 && displayRequests.some(r => r.iu_parts || r.enc_prev_ius));
+  const sra = jsonReport?.meta?.sra;
+  const batching = jsonReport?.meta?.batching || {};
+  const sraLabel = sra === true ? 'on' : sra === false ? 'off' : 'unknown';
+  const batchingLabel = batching.observed === true ? 'yes' : batching.observed === false ? 'no' : 'unknown';
+  const privacyLabel = (request, key) => request.parameterPresence?.[key] === false ? 'absent' : request[key] === null || request[key] === undefined ? 'unknown' : request[key] === '' ? 'empty' : String(request[key]);
+  const scopeNotes = jsonReport?.meta?.scopeNotes || ['Scope: one captured page session; capture coverage and consent action are unknown.'];
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -711,36 +687,45 @@ export function renderHtmlReport(snapshot, network, findings = [], jsonReport = 
           <div class="pill-list">
             <span class="pill pill-primary">
               <svg width="12" height="12" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
-              GPT: ${escapeHtml(gpt.version || 'Loaded')}
+              GPT: ${escapeHtml(gpt.version || (gpt.present ? 'version unknown' : 'not detected'))}
             </span>
-            <span class="pill ${consent.tcStringPresent ? 'pill-pass' : 'pill-fail'}">
-              Consent: ${consent.tcStringPresent ? `GDPR (${consent.tcStringLength} chars)` : 'No TC String'}
+            <span class="pill">
+              TC String: ${consent.tcStringPresent === true ? `present (${consent.tcStringLength} chars)` : consent.tcStringPresent === false ? 'absent' : 'unknown'}
             </span>
-            <span class="pill ${sraActive ? 'pill-pass' : 'pill-fail'}">
-              SRA: ${sraActive ? 'Enabled' : 'Disabled'}
+            <span class="pill">
+              Configured SRA: ${sraLabel}
+            </span>
+            <span class="pill">
+              Observed multi-slot batching: ${batchingLabel}
+            </span>
+            <span class="pill">
+              Transport-compressed requests: ${batching.transportCompressedRequestCount ?? 'unknown'}
+            </span>
+            <span class="pill">
+              NPA parameter: ${escapeHtml(consent.npaState ?? 'unknown')}
             </span>
             <span class="pill ${ppidDetected ? 'pill-pass' : 'pill-fail'}">
-              PPID: ${ppidDetected ? 'Present' : 'Absent'}
+              PPID: ${ppidDetected ? 'Present' : requests.length ? 'Absent' : 'unknown'}
             </span>
             ${compliance?.active ? `
-              <span class="pill ${compliance.passed ? 'pill-pass' : 'pill-fail'}">
-                Policy: ${compliance.passed ? 'Compliant ✅' : 'Non-Compliant ❌'}
+              <span class="pill ${compliance.passed === true ? 'pill-pass' : compliance.passed === false ? 'pill-fail' : ''}">
+                Policy: ${compliance.passed === true ? 'Compliant ✅' : compliance.passed === false ? 'Non-Compliant ❌' : 'Incomplete'}
               </span>
             ` : ''}
           </div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:16px">${scopeNotes.map(note => `<p>${escapeHtml(note)}</p>`).join('')}</div>
         </div>
 
-        <!-- Health Score Ring -->
+        <!-- Evidence scope ring -->
         <div class="score-card">
           <div class="gauge-wrap">
             <svg class="gauge-svg" width="120" height="120" viewBox="0 0 120 120">
               <circle class="gauge-bg" cx="60" cy="60" r="${radius}" fill="none" stroke-width="10"/>
-              <circle class="gauge-fill" cx="60" cy="60" r="${radius}" fill="none" stroke="${scoreColor}" stroke-width="10"
-                      stroke-dasharray="${circumference}" stroke-dashoffset="${strokeOffset}"/>
             </svg>
-            <div class="gauge-number">${healthScore}<span>/100</span></div>
+            <div class="gauge-number">—</div>
           </div>
-          <div class="score-title" style="color:${scoreColor}">${escapeHtml(scoreLabel)}</div>
+          <div class="score-title" style="color:var(--text-muted)">Score withheld</div>
+          <div class="score-desc">Single-session evidence does not support a 0–100 quality score.</div>
           <div class="score-desc">${summary.high} High &bull; ${summary.medium} Med &bull; ${summary.low} Low</div>
         </div>
       </div>
@@ -751,7 +736,7 @@ export function renderHtmlReport(snapshot, network, findings = [], jsonReport = 
       <div class="kpi-card">
         <div class="kpi-label">Slots Defined</div>
         <div class="kpi-value">${slots.length}</div>
-        <div class="kpi-sub">${slots.filter(s => s.inViewportOnLoad).length} in viewport on load${(jsonReport?.frames?.length) ? ` &bull; ${slots.filter(s => s.frame).length} in ${jsonReport.frames.length} iframe GPT instance(s)` : ''}</div>
+        <div class="kpi-sub">${slots.filter(s => s.inViewportAtCapture === true).length} in viewport at capture${(jsonReport?.frames?.length) ? ` &bull; ${slots.filter(s => s.frame).length} in ${jsonReport.frames.length} iframe GPT instance(s)` : ''}</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-label">Ad Requests (GAM)</div>
@@ -761,9 +746,9 @@ export function renderHtmlReport(snapshot, network, findings = [], jsonReport = 
       <div class="kpi-card">
         <div class="kpi-label">Fill Status</div>
         <div class="kpi-value" style="color:var(--accent-emerald)">
-          ${slots.filter(s => s.lineItemId && s.lineItemId !== 'unfilled').length} <span style="font-size:16px;color:var(--text-dim)">/ ${slots.length}</span>
+          ${slots.filter(s => s.fillStatus === 'filled').length} <span style="font-size:16px;color:var(--text-dim)">/ ${slots.length}</span>
         </div>
-        <div class="kpi-sub">${slots.filter(s => s.lineItemId === 'unfilled').length} unfilled slot(s)</div>
+        <div class="kpi-sub">${slots.filter(s => s.fillStatus === 'unfilled').length} unfilled &bull; ${slots.filter(s => s.fillStatus === 'unknown').length} unknown</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-label">Anomalies Detected</div>
@@ -787,7 +772,7 @@ export function renderHtmlReport(snapshot, network, findings = [], jsonReport = 
       </button>
       ${compliance?.active ? `
         <button class="tab-btn" data-tab="tab-compliance" onclick="switchTab('tab-compliance')">
-          Publisher Policy <span class="tab-badge">${compliance.passed ? 'Pass' : 'Fail'}</span>
+          Publisher Policy <span class="tab-badge">${compliance.passed === true ? 'Pass' : compliance.passed === false ? 'Fail' : 'Incomplete'}</span>
         </button>
       ` : ''}
       <button class="tab-btn" data-tab="tab-targeting" onclick="switchTab('tab-targeting')">
@@ -815,13 +800,13 @@ export function renderHtmlReport(snapshot, network, findings = [], jsonReport = 
                 <th>Element ID</th>
                 <th>Frame</th>
                 <th>Ad Unit Path</th>
-                <th>Requested Sizes</th>
+                <th>Declared Sizes</th>
                 <th>Rendered Size</th>
                 <th>Fill Classification</th>
                 <th>Line Item ID</th>
                 <th>Creative ID</th>
                 <th>SafeFrame</th>
-                <th>In Viewport</th>
+                <th>In Viewport at Capture</th>
                 <th>Targeting</th>
               </tr>
             </thead>
@@ -829,11 +814,8 @@ export function renderHtmlReport(snapshot, network, findings = [], jsonReport = 
               ${slots.map(s => {
                 const sizesReq = (s.sizes || []).map(sz => Array.isArray(sz) ? `${sz[0]}×${sz[1]}` : sz).join(', ') || 'none';
                 const sizeRend = Array.isArray(s.renderedSize) ? `${s.renderedSize[0]}×${s.renderedSize[1]}` : (s.renderedSize || 'none');
-                const isBackfill = s.render?.isBackfill === true;
-                const isEmpty = s.render?.isEmpty === true;
-                let fillBadge = '<span class="badge-fill direct">Direct / Standard</span>';
-                if (isEmpty) fillBadge = '<span class="badge-fill unfilled">Unfilled</span>';
-                else if (isBackfill) fillBadge = '<span class="badge-fill adx">AdX / Open Bidding</span>';
+                const fillClass = s.fillStatus === 'unfilled' ? 'unfilled' : s.render?.isBackfill === true ? 'adx' : s.fillType === 'Standard Line Item' ? 'direct' : '';
+                const fillBadge = `<span class="badge-fill ${fillClass}">${escapeHtml(s.fillType || 'Unknown')}</span>`;
 
                 return `
                 <tr>
@@ -846,7 +828,7 @@ export function renderHtmlReport(snapshot, network, findings = [], jsonReport = 
                   <td>${escapeHtml(s.lineItemId ?? 'null')}</td>
                   <td>${escapeHtml(s.creativeId ?? 'null')}</td>
                   <td>${s.safeFrame ? '<span style="color:var(--accent-emerald)">Yes</span>' : '<span style="color:var(--text-dim)">No</span>'}</td>
-                  <td>${s.inViewportOnLoad ? '<span style="color:var(--primary)">Yes</span>' : '<span style="color:var(--text-dim)">No</span>'}</td>
+                  <td>${s.inViewportAtCapture === true ? '<span style="color:var(--primary)">Yes</span>' : `<span style="color:var(--text-dim)">${s.inViewportAtCapture === false ? 'No' : 'Unknown'}</span>`}</td>
                   <td><span style="font-size:11px;color:var(--text-dim)">${(s.targetingKeys || []).slice(0, 3).join(', ')}${(s.targetingKeys?.length > 3 ? '…' : '') || 'none'}</span></td>
                 </tr>`;
               }).join('')}
@@ -886,11 +868,11 @@ export function renderHtmlReport(snapshot, network, findings = [], jsonReport = 
                   <td><code>${escapeHtml(r.correlator || 'none')}</code></td>
                   <td>${r.ppid ? '<span style="color:var(--accent-emerald)">Yes</span>' : '<span style="color:var(--text-dim)">No</span>'}</td>
                   <td><code>${escapeHtml(r.adUnits?.[0] ? `${r.adUnits[0]} (${r.adUnits.length})` : 'none')}</code></td>
-                  <td><span style="color:var(--accent-emerald)">${escapeHtml(r.status ?? 200)}</span></td>
-                  <td>${r.duration ? `${Math.round(r.duration)} ms` : '-'}</td>
-                  <td>${escapeHtml(r.gdpr ?? '-')}</td>
-                  <td>${r.gdpr_consent_length > 0 ? `<span style="color:var(--accent-emerald)">Yes (${r.gdpr_consent_length} chars)</span>` : '<span style="color:var(--text-dim)">No</span>'}</td>
-                  <td><code>npa:${escapeHtml(r.npa ?? '0')}, ltd:${escapeHtml(r.ltd ?? '0')}, rdp:${escapeHtml(r.rdp ?? '0')}</code></td>
+                  <td><span style="color:${r.status >= 200 && r.status < 300 ? 'var(--accent-emerald)' : 'var(--text-muted)'}">${escapeHtml(r.status ?? 'unknown')}</span></td>
+                  <td>${r.duration !== null && r.duration !== undefined ? `${Math.round(r.duration)} ms` : '-'}</td>
+                  <td>${escapeHtml(privacyLabel(r, 'gdpr'))}</td>
+                  <td>${r.gdpr_consent_length > 0 ? `<span style="color:var(--accent-emerald)">Yes (${r.gdpr_consent_length} chars)</span>` : `<span style="color:var(--text-dim)">${escapeHtml(r.parameterPresence?.gdpr_consent === false ? 'absent' : r.gdpr_consent_length === null || r.gdpr_consent_length === undefined ? 'unknown' : 'empty')}</span>`}</td>
+                  <td><code>npa:${escapeHtml(privacyLabel(r, 'npa'))}, ltd:${escapeHtml(privacyLabel(r, 'ltd'))}, rdp:${escapeHtml(privacyLabel(r, 'rdp'))}</code></td>
                 </tr>
               `).join('')}
             </tbody>
@@ -914,7 +896,7 @@ export function renderHtmlReport(snapshot, network, findings = [], jsonReport = 
 
         ${findings.length === 0 ? `
           <div style="text-align:center; padding: 48px; color:var(--accent-emerald)">
-            <h3>No anomalies detected! Setup is compliant and healthy.</h3>
+            <h3>No anomalies detected in the captured evidence.</h3>
           </div>
         ` : findings.map(f => `
           <div class="finding-card ${f.severity?.toLowerCase()}" data-sev="${f.severity?.toLowerCase()}">
@@ -938,7 +920,7 @@ export function renderHtmlReport(snapshot, network, findings = [], jsonReport = 
       <div class="section-card">
         <div class="section-head">
           <h2 class="section-title">Publisher Mandatory Parameters (${escapeHtml(compliance.publisher)})</h2>
-          <span class="badge-sev ${compliance.passed ? 'low' : 'high'}">${compliance.passed ? 'COMPLIANT ✅' : 'NON-COMPLIANT ❌'}</span>
+          <span class="badge-sev ${compliance.passed === true ? 'low' : compliance.passed === false ? 'high' : 'medium'}">${compliance.passed === true ? 'COMPLIANT ✅' : compliance.passed === false ? 'NON-COMPLIANT ❌' : 'INCOMPLETE'}</span>
         </div>
         <div class="table-responsive">
           <table>
@@ -956,9 +938,9 @@ export function renderHtmlReport(snapshot, network, findings = [], jsonReport = 
                   <td><code>${escapeHtml(c.name)}</code></td>
                   <td>${escapeHtml(c.type)}</td>
                   <td>
-                    ${c.passed
+                    ${c.passed === true
                       ? '<span class="badge-sev low" style="color:var(--accent-emerald);border-color:rgba(52,211,153,0.3);background:rgba(52,211,153,0.15)">✅ Passed</span>'
-                      : '<span class="badge-sev high">❌ Failed</span>'}
+                      : c.passed === false ? '<span class="badge-sev high">❌ Failed</span>' : '<span class="badge-sev medium">➖ Unknown</span>'}
                   </td>
                   <td>${escapeHtml(c.details)}</td>
                 </tr>
@@ -977,12 +959,12 @@ export function renderHtmlReport(snapshot, network, findings = [], jsonReport = 
         <div class="section-head">
           <h2 class="section-title">TCF v2 Consent &amp; Purpose Analysis</h2>
           <span class="badge-sev ${tcf.status === 'healthy' ? 'low' : tcf.status === 'error' ? 'high' : 'medium'}">
-            ${escapeHtml(tcf.status === 'healthy' ? 'TCF Healthy ✅' : tcf.status === 'error' ? 'TCF Issues ❌' : 'TCF Inactive')}
+            ${escapeHtml(tcf.status === 'healthy' ? 'TCF Healthy ✅' : tcf.status === 'error' ? 'TCF Issues ❌' : tcf.status === 'incomplete' ? 'TCF Incomplete' : tcf.status === 'unknown' ? 'TCF Unknown' : 'TCF Inactive')}
           </span>
         </div>
         <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">${escapeHtml(tcf.statusSummary || '')}</p>
         <div class="pill-list" style="margin-bottom:16px">
-          <span class="pill ${tcf.apiPresent ? 'pill-pass' : 'pill-fail'}">__tcfapi: ${tcf.apiPresent ? 'true' : 'false'}</span>
+          <span class="pill ${tcf.apiPresent === true ? 'pill-pass' : tcf.apiPresent === false ? 'pill-fail' : ''}">__tcfapi: ${tcf.apiPresent === null ? 'unknown' : String(tcf.apiPresent)}</span>
           <span class="pill">GDPR Applies: ${escapeHtml(tcf.gdprApplies === null ? 'unknown' : String(tcf.gdprApplies))}</span>
           <span class="pill">CMP ID: ${escapeHtml(tcf.cmpId ?? 'n/a')}</span>
           <span class="pill">Policy Ver: ${escapeHtml(tcf.tcfPolicyVersion ?? 'n/a')}</span>
@@ -1002,6 +984,13 @@ export function renderHtmlReport(snapshot, network, findings = [], jsonReport = 
             ${escapeHtml(tcf.tcString || 'absent')}
           </div>
         </div>
+        ${(tcf.checks || []).length ? `
+        <div class="table-responsive" style="margin-bottom:18px">
+          <table>
+            <thead><tr><th>TCF Check</th><th>Status</th><th>Details</th></tr></thead>
+            <tbody>${tcf.checks.map(check => `<tr><td>${escapeHtml(check.name)}</td><td>${check.passed === null ? 'Unknown' : check.passed ? 'Passed' : 'Failed'}</td><td>${escapeHtml(check.details)}</td></tr>`).join('')}</tbody>
+          </table>
+        </div>` : ''}
         <div class="table-responsive">
           <table>
             <thead>

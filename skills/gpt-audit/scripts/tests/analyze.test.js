@@ -162,7 +162,7 @@ test('analyze: triggers R01, R05, R06, R07, and R09 on synthetic fixture', async
   assert.ok(html.includes('<!DOCTYPE html>'));
   assert.ok(html.includes('class="hero"'));
   assert.ok(html.includes('fixture.example.com'));
-  assert.ok(html.includes('gauge-svg')); // Health Score gauge
+  assert.ok(html.includes('Score withheld')); // Findings alone do not justify a numeric health score
   assert.ok(html.includes('tab-slots'));
   assert.ok(html.includes('tab-findings'));
 
@@ -359,9 +359,10 @@ test('analyze: R02 duplicate DOM id, R04 container width fit, and R13 PII / over
   assert.ok(r13Url, 'R13 must flag ad request URL exceeding 8000 chars');
 
   const { json } = renderReport(snapshot, network, findings);
-  assert.equal(json.meta.sra, false, 'SRA must be false when isSra is false');
+  assert.equal(json.meta.sra, null, 'transport fields do not establish configured SRA');
+  assert.equal(json.meta.batching.observed, true, 'two distinct ad units in a request establish batching');
   const compMd = renderComparison([json]);
-  assert.ok(compMd.includes('| off |'), 'Comparison table must report SRA off when SRA is not used');
+  assert.ok(compMd.includes('| unknown | yes |'), 'Comparison keeps unknown configuration separate from observed batching');
 });
 
 test('tcf: decodes TCF v2 bitstream, evaluates purposes 1-10 true/false, and renders in report', () => {

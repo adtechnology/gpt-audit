@@ -11,6 +11,7 @@
 
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { getRequestSlotCount } from './batching.js';
 
 function decodeKeyValues(str) {
   if (!str) return {};
@@ -79,7 +80,7 @@ export function parseAdRequestUrl(url) {
   const prevScpRaw = p.get('prev_scp');
   const prev_scp = prevScpRaw ? prevScpRaw.split('|').map(decodeKeyValues) : [];
 
-  return {
+  const parsed = {
     host: u.host,
     path: u.pathname,
     urlLength: url.length,
@@ -120,6 +121,8 @@ export function parseAdRequestUrl(url) {
     sfv: p.get('sfv'),
     raw: Object.fromEntries(p.entries())
   };
+  const slotCount = getRequestSlotCount(parsed);
+  return { ...parsed, slotCount, isBatched: slotCount === null ? null : slotCount > 1 };
 }
 
 export function parseNetworkRaw(rawContent) {
@@ -146,7 +149,7 @@ export function parseNetworkRaw(rawContent) {
 
       const rest = firstLineEnd !== -1 ? block.slice(firstLineEnd) : '';
       const statusMatch = rest.match(/^Status:\s*(\d+)/m);
-      const status = statusMatch ? parseInt(statusMatch[1], 10) : 200;
+      const status = statusMatch ? parseInt(statusMatch[1], 10) : null;
 
       const startTimeMatch = rest.match(/startTime[:=]\s*([\d.]+)/i) || rest.match(/start[:=]\s*([\d.]+)/i);
       const durationMatch = rest.match(/duration[:=]\s*([\d.]+)/i) || rest.match(/time[:=]\s*([\d.]+)/i);
@@ -179,7 +182,7 @@ export function parseNetworkRaw(rawContent) {
     const statusMatch = tail.match(/\[(\d+)\]/);
     items.push({
       url,
-      status: statusMatch ? parseInt(statusMatch[1], 10) : 200,
+      status: statusMatch ? parseInt(statusMatch[1], 10) : null,
       reqid: parseInt(match[1], 10),
       source: 'list'
     });
@@ -190,7 +193,11 @@ export function parseNetworkRaw(rawContent) {
 }
 
 export function extractNetworkData(rawInput) {
-  const items = typeof rawInput === 'string' ? parseNetworkRaw(rawInput) : (Array.isArray(rawInput) ? rawInput : (rawInput.requests || rawInput.data || []));
+  let input = rawInput;
+  if (typeof rawInput === 'string') {
+    try { input = JSON.parse(rawInput); } catch (_) {}
+  }
+  const items = typeof input === 'string' ? parseNetworkRaw(input) : (Array.isArray(input) ? input : (input.requests || input.data || []));
   const requests = [];
   const libraries = [];
 
@@ -198,7 +205,8 @@ export function extractNetworkData(rawInput) {
     const url = item.url || item.request?.url || item.response?.url || (typeof item === 'string' ? item : '');
     if (!url) continue;
 
-    const status = item.status ?? item.response?.status ?? null;
+    const suppliedStatus = item.status ?? item.response?.status ?? item.responseStatus ?? null;
+    const status = Number.isInteger(suppliedStatus) && suppliedStatus > 0 ? suppliedStatus : null;
     const startTime = item.timing?.startTime ?? item.startTime ?? item.time ?? null;
     const duration = item.timing?.duration ?? item.duration ?? null;
 
@@ -252,7 +260,7 @@ export function extractNetworkData(rawInput) {
     }
   }
 
-  return { requests, libraries };
+  return { requests, libraries, ...(input?.capture ? { capture: input.capture } : {}) };
 }
 
 // CLI entry point

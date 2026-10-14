@@ -2,7 +2,10 @@
 // Severity: High
 // Evidence: slot has no response, no dom.queryId, and no gampad/ads row names its ad unit
 
+import { initialRequestsMayBeMissing } from '../capture.js';
+
 export default function r01SlotNeverDisplayed(snapshot, network) {
+  if (initialRequestsMayBeMissing(snapshot, network)) return [];
   const findings = [];
   const slots = snapshot?.slots || [];
   const requests = network?.requests || [];

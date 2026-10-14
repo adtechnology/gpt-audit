@@ -158,7 +158,7 @@ export function analyzeTcf(snapshot, network) {
   const tcfSnap = snapshot?.neighbours?.consent?.tcf || {};
   const requests = network?.requests || [];
 
-  const apiPresent = Boolean(tcfSnap.present);
+  const apiPresent = typeof tcfSnap.present === 'boolean' ? tcfSnap.present : null;
   const netGdprReq = requests.find(r => r.gdpr !== undefined && r.gdpr !== null);
   const netTcReq = requests.find(r => (r.tcString && r.tcString.length > 0) || (r.raw?.gdpr_consent && r.raw.gdpr_consent.length > 0));
   const netTcString = netTcReq?.tcString || netTcReq?.raw?.gdpr_consent || null;
@@ -256,13 +256,13 @@ export function analyzeTcf(snapshot, network) {
     checks.push({
       name: '__tcfapi Present',
       passed: apiPresent,
-      details: apiPresent ? `window.__tcfapi detected${cmpId !== null ? ` (CMP ID: ${cmpId})` : ''}` : 'window.__tcfapi not found in main frame'
+      details: apiPresent === true ? `window.__tcfapi detected${cmpId !== null ? ` (CMP ID: ${cmpId})` : ''}` : apiPresent === false ? 'window.__tcfapi not found in main frame' : 'TCF API presence was not captured'
     });
 
-    const hasValidTc = tcStringLength > 0 && (decoded !== null || !tcString);
+    const hasValidTc = decoded?.valid === true;
     checks.push({
       name: 'TC String Present & Valid',
-      passed: gdprApplies === false ? true : hasValidTc,
+      passed: gdprApplies === false || hasValidTc ? true : tcStringLength > 0 && !tcString ? null : false,
       details: tcStringLength > 0
         ? `TC string length ${tcStringLength} chars (${tcStringSource})${decoded ? `, TCF v${decoded.version} Policy v${decoded.tcfPolicyVersion}` : ''}`
         : (gdprApplies === false ? 'GDPR does not apply (gdpr=0)' : 'TC string is empty or missing while GDPR applies')
@@ -278,14 +278,15 @@ export function analyzeTcf(snapshot, network) {
     }
 
     if (p1Consent !== null) {
-      const npaOrLtdSent = requests.length === 0 || requests.every(r => r.npa === '1' || r.ltd === '1');
-      const p1Consistent = p1Consent === true || npaOrLtdSent;
+      const gdprRequests = requests.filter(r => r.gdpr === '1');
+      const limitedAdsRequested = gdprRequests.length > 0 && gdprRequests.every(r => r.ltd === '1');
+      const p1Consistent = p1Consent === true || gdprRequests.length === 0 || limitedAdsRequested ? true : null;
       checks.push({
         name: 'Purpose 1 (Device Storage) Consistency',
         passed: p1Consistent,
         details: p1Consent === true
           ? 'Purpose 1 consented (true)'
-          : (npaOrLtdSent ? 'Purpose 1 denied (false); ad requests carry npa=1 / ltd=1' : 'Purpose 1 denied (false), but ad requests omit npa=1 and ltd=1')
+          : (limitedAdsRequested ? 'Purpose 1 denied; observed requests explicitly request limited ads (ltd=1)' : gdprRequests.length === 0 ? 'Purpose 1 denied; no GDPR ad request captured' : 'Purpose 1 denied; serving mode is unverified. GPT may apply CMP signals automatically; absent npa/ltd parameters do not establish a violation.')
       });
     }
 
@@ -302,10 +303,14 @@ export function analyzeTcf(snapshot, network) {
   let status = 'not_applicable';
   let statusSummary = 'TCF / GDPR not active on this page';
   if (tcfActive) {
-    const failedChecks = checks.filter(c => !c.passed);
+    const failedChecks = checks.filter(c => c.passed === false);
+    const unknownChecks = checks.filter(c => c.passed === null);
     if (failedChecks.length > 0) {
       status = 'error';
       statusSummary = `TCF issues detected: ${failedChecks.map(c => c.name).join(', ')}`;
+    } else if (unknownChecks.length > 0) {
+      status = 'incomplete';
+      statusSummary = `TCF evidence incomplete: ${unknownChecks.map(c => c.name).join(', ')}`;
     } else if (gdprApplies === false) {
       status = 'healthy';
       statusSummary = 'TCF present; GDPR does not apply (gdpr=0)';

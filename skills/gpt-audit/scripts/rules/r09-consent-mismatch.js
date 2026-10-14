@@ -1,6 +1,6 @@
 // R09: Consent mismatch
 // Severity: High
-// Evidence: gdpr=1 with empty gdpr_consent; gdpr=1 but no __tcfapi; npa absent while purpose1 consent false;
+// Evidence: gdpr=1 with empty gdpr_consent; gdpr=1 but explicitly absent __tcfapi;
 //           gdpr=1 while a custom key-value (gdpr_applies / gdpr) in cust_params, scp, prev_scp or slot targeting says 0;
 //           ad requests fired while __tcfapi eventStatus is cmpuishown; or __tcfapi tcString differs from network gdpr_consent
 
@@ -24,7 +24,7 @@ export default function r09ConsentMismatch(snapshot, network) {
   // 2. gdpr=1 but no __tcfapi
   const hasGdprRequest = requests.some(r => r.gdpr === '1');
   const hasTcfApi = tcf?.present === true;
-  if (hasGdprRequest && !hasTcfApi) {
+  if (hasGdprRequest && tcf?.present === false) {
     findings.push({
       id: 'R09',
       severity: 'high',
@@ -34,20 +34,8 @@ export default function r09ConsentMismatch(snapshot, network) {
     });
   }
 
-  // 3. npa absent while purpose1 consent is false
-  const p1False = tcf?.purpose1 === false || tcf?.purposeConsents?.[1] === false;
-  if (tcf?.present && tcf.gdprApplies === true && p1False) {
-    const nonCompliantReqs = requests.filter(r => r.npa !== '1' && r.ltd !== '1');
-    if (nonCompliantReqs.length > 0) {
-      findings.push({
-        id: 'R09',
-        severity: 'high',
-        slot: null,
-        evidence: `TCF purpose 1 consent is false under GDPR, but ${nonCompliantReqs.length} ad request(s) omit npa=1 and ltd=1`,
-        fix: `configure CMP / GPT privacy settings to request non-personalized ads (npa=1) or limited ads (ltd=1) when Purpose 1 consent is denied`
-      });
-    }
-  }
+  // GPT can consume CMP signals and select limited ads automatically. Missing npa/ltd
+  // parameters do not establish personalized serving or a Purpose 1 violation.
 
   // 4. gdpr=1 on the request while a custom key-value says GDPR does not apply
   const GDPR_KEYS = ['gdpr_applies', 'gdprapplies', 'gdpr'];
@@ -75,14 +63,14 @@ export default function r09ConsentMismatch(snapshot, network) {
     });
   }
 
-  // 5. Ad requests fired while CMP UI is still shown (eventStatus === 'cmpuishown')
+  // A final CMP snapshot cannot establish when earlier requests were sent.
   if (tcf?.present && tcf.gdprApplies === true && tcf.eventStatus === 'cmpuishown' && hasGdprRequest) {
     findings.push({
       id: 'R09',
-      severity: 'high',
+      severity: 'medium',
       slot: null,
-      evidence: `ad requests with gdpr=1 fired while TCF eventStatus is "cmpuishown" (before user consent interaction completed)`,
-      fix: `delay googletag.display() / refresh() until __tcfapi eventStatus reaches "tcloaded" or "useractioncomplete"`
+      evidence: `captured GDPR ad requests coexist with final TCF eventStatus "cmpuishown"; request ordering relative to consent is not established`,
+      fix: `review timestamped CMP and request events to verify consent handling; a user may have reopened the consent dialog after earlier requests`
     });
   }
 
