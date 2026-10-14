@@ -21,6 +21,7 @@ export function renderHtmlReport(snapshot, network, findings = [], jsonReport = 
   const neighbours = snapshot?.neighbours || {};
   const summary = jsonReport?.summary || { high: 0, medium: 0, low: 0, total: 0 };
   const consent = jsonReport?.meta?.consent || {};
+  const tcf = jsonReport?.tcf || null;
 
   // Calculate Health Score (0–100)
   let healthScore = 100;
@@ -790,7 +791,7 @@ export function renderHtmlReport(snapshot, network, findings = [], jsonReport = 
         </button>
       ` : ''}
       <button class="tab-btn" data-tab="tab-targeting" onclick="switchTab('tab-targeting')">
-        Page Targeting & Signals
+        Targeting, TCF &amp; Signals
       </button>
       <button class="tab-btn" data-tab="tab-visual" onclick="switchTab('tab-visual')">
         Visual Screenshots
@@ -971,6 +972,63 @@ export function renderHtmlReport(snapshot, network, findings = [], jsonReport = 
 
     <!-- TAB 5: TARGETING & SIGNALS -->
     <div id="tab-targeting" class="tab-pane">
+      ${tcf ? `
+      <div class="section-card">
+        <div class="section-head">
+          <h2 class="section-title">TCF v2 Consent &amp; Purpose Analysis</h2>
+          <span class="badge-sev ${tcf.status === 'healthy' ? 'low' : tcf.status === 'error' ? 'high' : 'medium'}">
+            ${escapeHtml(tcf.status === 'healthy' ? 'TCF Healthy ✅' : tcf.status === 'error' ? 'TCF Issues ❌' : 'TCF Inactive')}
+          </span>
+        </div>
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">${escapeHtml(tcf.statusSummary || '')}</p>
+        <div class="pill-list" style="margin-bottom:16px">
+          <span class="pill ${tcf.apiPresent ? 'pill-pass' : 'pill-fail'}">__tcfapi: ${tcf.apiPresent ? 'true' : 'false'}</span>
+          <span class="pill">GDPR Applies: ${escapeHtml(tcf.gdprApplies === null ? 'unknown' : String(tcf.gdprApplies))}</span>
+          <span class="pill">CMP ID: ${escapeHtml(tcf.cmpId ?? 'n/a')}</span>
+          <span class="pill">Policy Ver: ${escapeHtml(tcf.tcfPolicyVersion ?? 'n/a')}</span>
+          <span class="pill">Event Status: ${escapeHtml(tcf.eventStatus || 'n/a')}</span>
+          <span class="pill">Google Vendor (755): ${escapeHtml(tcf.googleVendor?.consent === null ? 'n/a' : String(tcf.googleVendor?.consent))}</span>
+          ${tcf.gamEligibility?.personalizedAds !== null ? `
+            <span class="pill ${tcf.gamEligibility.personalizedAds ? 'pill-pass' : 'pill-fail'}">Personalized Ads: ${tcf.gamEligibility.personalizedAds ? 'true' : 'false'}</span>
+            <span class="pill ${tcf.gamEligibility.nonPersonalizedAds ? 'pill-pass' : 'pill-fail'}">Non-Personalized Ads: ${tcf.gamEligibility.nonPersonalizedAds ? 'true' : 'false'}</span>
+            <span class="pill">Limited Ads: ${tcf.gamEligibility.limitedAds ? 'true' : 'false'}</span>
+          ` : ''}
+        </div>
+        <div style="margin-bottom:18px">
+          <div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:6px">
+            TC String (<code>tcString</code> — ${tcf.tcStringLength || 0} chars, source: <code>${escapeHtml(tcf.tcStringSource || 'none')}</code>)
+          </div>
+          <div style="background:rgba(0,0,0,0.35);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;font-family:var(--font-mono);font-size:12px;color:#7dd3fc;word-break:break-all">
+            ${escapeHtml(tcf.tcString || 'absent')}
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table>
+            <thead>
+              <tr>
+                <th>Purpose</th>
+                <th>Description</th>
+                <th>Consent</th>
+                <th>Legitimate Interest</th>
+                <th>GAM Requirement</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${(tcf.purposes || []).map(p => `
+                <tr>
+                  <td><b>Purpose ${p.id}</b></td>
+                  <td>${escapeHtml(p.name)}</td>
+                  <td>${p.consent === null ? '<span style="color:var(--text-dim)">n/a</span>' : p.consent ? '<span class="badge-fill direct">true</span>' : '<span class="badge-fill unfilled">false</span>'}</td>
+                  <td>${p.legitimateInterest === null ? '<span style="color:var(--text-dim)">n/a</span>' : p.legitimateInterest ? '<span class="badge-fill direct">true</span>' : '<span style="color:var(--text-dim)">false</span>'}</td>
+                  <td style="font-size:12px;color:var(--text-muted)">${escapeHtml(p.gamRole)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      ` : ''}
+
       <div class="section-card">
         <div class="section-head">
           <h2 class="section-title">Page-Level Targeting (pubads().getTargeting)</h2>

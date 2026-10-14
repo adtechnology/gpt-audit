@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { analyze } from '../analyze.js';
 import { renderReport, renderComparison } from '../report.js';
+import { decodeTcString, analyzeTcf } from '../tcf.js';
 
 test('analyze: triggers R01, R05, R06, R07, and R09 on synthetic fixture', async () => {
   const snapshot = {
@@ -292,4 +293,164 @@ test('analyze: R16 passes when all publisher requirements are satisfied', async 
   const compMd = renderComparison([json]);
   assert.ok(compMd.includes('✅ Pass'));
 });
+
+test('analyze: R02 duplicate DOM id, R04 container width fit, and R13 PII / oversized URL', async () => {
+  const snapshot = {
+    meta: {
+      url: 'https://broken.example.com',
+      viewport: { w: 1280, h: 800, dpr: 1 }
+    },
+    gpt: {
+      present: true,
+      version: '202610090101',
+      scriptTags: [{ src: 'https://securepubads.g.doubleclick.net/tag/js/gpt.js', async: true, inHead: true }],
+      pageTargeting: { email: 'test@example.com', section: 'home' }
+    },
+    slots: [
+      // R02: duplicate DOM elements with same id (dom.count = 2)
+      {
+        elementId: 'div-gpt-ad-c',
+        adUnitPath: '/6355419/Travel/Europe',
+        sizes: [[300, 250]],
+        response: { lineItemId: 101 },
+        render: { isEmpty: false, size: [300, 250], lineItemId: 101 },
+        dom: { exists: true, count: 2, boundingRect: { width: 300, height: 250 }, queryId: 'q1', reservedHeight: true },
+        iframe: { present: true, w: 300, h: 250 }
+      },
+      // R04: 970x250 slot inside a 300px wide container on a 1280px viewport
+      {
+        elementId: 'div-gpt-ad-e',
+        adUnitPath: '/6355419/Travel/Oversize',
+        sizes: [[970, 250]],
+        response: { lineItemId: 102 },
+        render: { isEmpty: false, size: [970, 250], lineItemId: 102 },
+        dom: { exists: true, count: 1, cssDisplay: 'block', boundingRect: { width: 300, height: 250 }, queryId: 'q2', reservedHeight: true },
+        iframe: { present: true, w: 970, h: 250 }
+      }
+    ]
+  };
+
+  const network = {
+    requests: [
+      {
+        kind: 'display',
+        isSra: false,
+        urlLength: 8500,
+        correlator: '12345',
+        adUnits: ['/6355419/Travel/Europe', '/6355419/Travel/Oversize'],
+        cust_params: { email: 'test@example.com' }
+      }
+    ]
+  };
+
+  const findings = await analyze(snapshot, network);
+  const r02 = findings.find(f => f.id === 'R02' && f.slot === 'div-gpt-ad-c');
+  assert.ok(r02, 'R02 must flag slot with duplicate DOM elements (dom.count > 1)');
+  assert.ok(r02.evidence.includes('2 elements'));
+
+  const r04 = findings.find(f => f.id === 'R04' && f.slot === 'div-gpt-ad-e');
+  assert.ok(r04, 'R04 must flag slot whose sizes exceed its DOM container width');
+  assert.ok(r04.evidence.includes('300px'));
+
+  const r13Pii = findings.find(f => f.id === 'R13' && f.evidence.includes('test@example.com'));
+  assert.ok(r13Pii, 'R13 must flag raw email PII in targeting');
+
+  const r13Url = findings.find(f => f.id === 'R13' && f.evidence.includes('8500'));
+  assert.ok(r13Url, 'R13 must flag ad request URL exceeding 8000 chars');
+
+  const { json } = renderReport(snapshot, network, findings);
+  assert.equal(json.meta.sra, false, 'SRA must be false when isSra is false');
+  const compMd = renderComparison([json]);
+  assert.ok(compMd.includes('| off |'), 'Comparison table must report SRA off when SRA is not used');
+});
+
+test('tcf: decodes TCF v2 bitstream, evaluates purposes 1-10 true/false, and renders in report', () => {
+  // Build a synthetic valid 32-byte TCF v2 core bitstream:
+  // version=2 (bits 0..5), cmpId=300 (bits 78..89), cmpVersion=2 (bits 90..101),
+  // consentLanguage="EN" (bits 108..119), vendorListVersion=120 (bits 120..131),
+  // tcfPolicyVersion=4 (bits 132..137), isServiceSpecific=1 (bit 138),
+  // specialFeatureOptins: SF1=true, SF2=false (bits 140..141),
+  // purposeConsents: P1=true, P2=true, P3=false, P4=false, P7=true (bits 152..161),
+  // purposeLegitimateInterests: P2=true, P7=true, P9=true, P10=true (bits 176..185),
+  // publisherCC="ES" (bits 201..212)
+  const buf = Buffer.alloc(36, 0);
+  const setBits = (offset, len, val) => {
+    for (let i = 0; i < len; i++) {
+      const bit = (val >> (len - 1 - i)) & 1;
+      const pos = offset + i;
+      if (bit) buf[pos >> 3] |= (1 << (7 - (pos & 7)));
+    }
+  };
+  setBits(0, 6, 2);     // version = 2
+  setBits(78, 12, 300); // cmpId = 300
+  setBits(90, 12, 2);   // cmpVersion = 2
+  setBits(108, 6, 4);   // 'E'
+  setBits(114, 6, 13);  // 'N'
+  setBits(120, 12, 120); // vendorListVersion = 120
+  setBits(132, 6, 4);   // tcfPolicyVersion = 4
+  setBits(138, 1, 1);   // isServiceSpecific = true
+  setBits(140, 1, 1);   // SF1 = true
+  setBits(152, 1, 1);   // Purpose 1 consent = true
+  setBits(153, 1, 1);   // Purpose 2 consent = true
+  setBits(158, 1, 1);   // Purpose 7 consent = true
+  setBits(177, 1, 1);   // Purpose 2 LI = true
+  setBits(182, 1, 1);   // Purpose 7 LI = true
+  setBits(184, 1, 1);   // Purpose 9 LI = true
+  setBits(185, 1, 1);   // Purpose 10 LI = true
+  setBits(201, 6, 4);   // 'E'
+  setBits(207, 6, 18);  // 'S'
+  // Vendor consent section at bit 213: range=1, numEntries=1, single vendor 755
+  setBits(213, 16, 755); // maxVendorId = 755
+  setBits(229, 1, 1);    // isRange = 1
+  setBits(230, 12, 1);   // numEntries = 1
+  setBits(242, 1, 0);    // single vendorId entry
+  setBits(243, 16, 755); // vendor 755
+
+  const tcString = buf.toString('base64url');
+  const decoded = decodeTcString(tcString);
+  assert.ok(decoded && decoded.valid, 'TC string should decode as valid TCF v2');
+  assert.equal(decoded.version, 2);
+  assert.equal(decoded.cmpId, 300);
+  assert.equal(decoded.tcfPolicyVersion, 4);
+  assert.equal(decoded.publisherCC, 'ES');
+  assert.equal(decoded.purposeConsents[1], true);
+  assert.equal(decoded.purposeConsents[2], true);
+  assert.equal(decoded.purposeConsents[3], false);
+  assert.equal(decoded.purposeConsents[4], false);
+  assert.equal(decoded.purposeConsents[7], true);
+  assert.equal(decoded.purposeLegitimateInterests[9], true);
+  assert.equal(decoded.purposeLegitimateInterests[10], true);
+  assert.equal(decoded.googleVendorConsent, true);
+
+  const snapshot = {
+    meta: { url: 'https://tcf.example.com' },
+    gpt: { present: true, version: '202610090101' },
+    slots: [],
+    neighbours: {
+      consent: {
+        tcf: { present: true, gdprApplies: true, tcString, tcStringLength: tcString.length, eventStatus: 'tcloaded' }
+      }
+    }
+  };
+  const network = {
+    requests: [{ kind: 'display', gdpr: '1', gdpr_consent: tcString.length, tcString, npa: '0' }]
+  };
+
+  const analysis = analyzeTcf(snapshot, network);
+  assert.equal(analysis.status, 'healthy');
+  assert.equal(analysis.tcString, tcString);
+  assert.equal(analysis.gamEligibility.nonPersonalizedAds, true);
+  assert.equal(analysis.gamEligibility.personalizedAds, false); // P3 & P4 are false
+
+  const { markdown, json, html } = renderReport(snapshot, network, []);
+  assert.equal(json.tcf.tcString, tcString);
+  assert.equal(json.meta.consent.purposeConsents[1], true);
+  assert.equal(json.meta.consent.purposeConsents[3], false);
+  assert.ok(markdown.includes('### TCF v2 Consent & Purpose Analysis'));
+  assert.ok(markdown.includes(tcString));
+  assert.ok(markdown.includes('| **Purpose 1** |'));
+  assert.ok(html.includes('TCF v2 Consent &amp; Purpose Analysis'));
+  assert.ok(html.includes(tcString));
+});
+
 

@@ -8,7 +8,7 @@
   "repository": "https://github.com/adtechnology/gpt-audit",
   "engines": { "node": ">=22" },
   "scripts": {
-    "check": "node --check skills/gpt-audit/scripts/collect-gpt.js && node --check skills/gpt-audit/scripts/network-extract.js && node --check skills/gpt-audit/scripts/analyze.js && node --check skills/gpt-audit/scripts/report.js && node --check skills/gpt-audit/scripts/report-html.js",
+    "check": "node --check skills/gpt-audit/scripts/collect-gpt.js && node --check skills/gpt-audit/scripts/network-extract.js && node --check skills/gpt-audit/scripts/tcf.js && node --check skills/gpt-audit/scripts/analyze.js && node --check skills/gpt-audit/scripts/report.js && node --check skills/gpt-audit/scripts/report-html.js",
     "extract": "node skills/gpt-audit/scripts/network-extract.js",
     "analyze": "node skills/gpt-audit/scripts/analyze.js",
     "report": "node skills/gpt-audit/scripts/report.js",

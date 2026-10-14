@@ -1,6 +1,6 @@
 // R02: Slot div missing in DOM or duplicated
 // Severity: High
-// Evidence: dom.exists false, or two slots share elementId
+// Evidence: dom.exists false, dom.count > 1 (duplicate DOM id), or two slots share elementId
 
 export default function r02DomMissingOrDuplicate(snapshot) {
   const findings = [];
@@ -34,6 +34,15 @@ export default function r02DomMissingOrDuplicate(snapshot) {
         slot: slot.elementId,
         evidence: `elementId "${slot.elementId}" is defined ${idCounts.get(slot.elementId)} times in pubads`,
         fix: `ensure unique container ids for each defined ad slot`
+      });
+    } else if (slot.elementId && (slot.dom?.count || 0) > 1 && !reportedDuplicates.has(slot.elementId)) {
+      reportedDuplicates.add(slot.elementId);
+      findings.push({
+        id: 'R02',
+        severity: 'high',
+        slot: slot.elementId,
+        evidence: `DOM contains ${slot.dom.count} elements with duplicate id="#${slot.elementId}"`,
+        fix: `remove duplicate <div id="${slot.elementId}"> elements so each ad slot has a unique DOM container`
       });
     }
   }

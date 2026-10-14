@@ -2,7 +2,7 @@
 // report.js — Phase 2 (see docs/PLAN.md, "Phase 2 — analyzer and report").
 //
 // CLI: node report.js <snapshot.json> <network.json> <findings.json> [-c <config.json>] -o <out/<host>/>
-//      → writes report.md and report.json in the layout given in the plan.
+//      → writes report.md, report.json, and report.html in the layout given in the plan.
 // CLI: node report.js --compare out/*/report.json -o out/comparison.md
 //      → one table, one row per host: GPT version · slots · ad requests · SRA · lazy load ·
 //        initial load disabled · Prebid version · consent (gdpr, tcString present, npa) ·
@@ -11,6 +11,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { evaluateCompliance } from './rules/r16-publisher-mandatory-params.js';
+import { analyzeTcf } from './tcf.js';
 import { renderHtmlReport } from './report-html.js';
 
 export function renderReport(snapshot, network, findings = [], options = {}) {
@@ -37,6 +38,7 @@ export function renderReport(snapshot, network, findings = [], options = {}) {
   }
 
   const compliance = evaluateCompliance(snapshot, network, config);
+  const tcfAnalysis = analyzeTcf(snapshot, network);
 
   const highFindings = findings.filter(f => f.severity?.toLowerCase() === 'high');
   const medFindings = findings.filter(f => f.severity?.toLowerCase() === 'medium');
@@ -44,15 +46,28 @@ export function renderReport(snapshot, network, findings = [], options = {}) {
 
   // Consent summary
   const gdprParam = requests.find(r => r.gdpr !== undefined)?.gdpr ?? (neighbours.consent?.tcf?.gdprApplies ? '1' : '0');
-  const tcStringLen = requests.find(r => r.gdpr_consent !== undefined)?.gdpr_consent ?? neighbours.consent?.tcf?.tcStringLength ?? 0;
+  const tcStringLen = tcfAnalysis.tcStringLength || (requests.find(r => r.gdpr_consent !== undefined)?.gdpr_consent ?? neighbours.consent?.tcf?.tcStringLength ?? 0);
   const npaParam = requests.find(r => r.npa !== undefined)?.npa ?? '0';
 
   const consentSummary = {
     gdpr: gdprParam,
     tcStringPresent: tcStringLen > 0,
     tcStringLength: tcStringLen,
-    npa: npaParam === '1'
+    tcString: tcfAnalysis.tcString || null,
+    tcfStatus: tcfAnalysis.status,
+    cmpId: tcfAnalysis.cmpId,
+    npa: npaParam === '1',
+    purposeConsents: Object.fromEntries(tcfAnalysis.purposes.map(p => [p.id, p.consent])),
+    purposeLegitimateInterests: Object.fromEntries(tcfAnalysis.purposes.map(p => [p.id, p.legitimateInterest]))
   };
+
+  const displayRequests = requests.filter(r => (r.kind || 'display') === 'display');
+  const sraEnabled = Boolean(
+    gpt.config?.singleRequest === true ||
+    displayRequests.some(r => r.isSra === true || Boolean(r.iu_parts || r.enc_prev_ius || r.prev_iu_szs))
+  );
+  const lazyLoadEnabled = Boolean(gpt.config?.lazyLoad);
+  const initialLoadDisabled = Boolean(gpt.initialLoadDisabled);
 
   // Build JSON report
   const jsonReport = {
@@ -67,7 +82,19 @@ export function renderReport(snapshot, network, findings = [], options = {}) {
       frameSlotCount,
       gptInstances,
       requestCount: requests.length,
+      sra: sraEnabled,
+      lazyLoad: lazyLoadEnabled,
+      initialLoadDisabled,
       consent: consentSummary
+    },
+    tcf: tcfAnalysis,
+    prebid: {
+      present: Boolean(neighbours.prebid?.present),
+      version: neighbours.prebid?.version || null,
+      bidderTimeout: neighbours.prebid?.bidderTimeout ?? null,
+      adUnitCount: neighbours.prebid?.adUnits?.length || 0,
+      bidCount: neighbours.prebid?.bids?.length || 0,
+      hbKeysOnSlots: Boolean(neighbours.prebid?.hbKeysOnSlots)
     },
     frames: frames.map(f => ({
       iframeId: f.iframeId || '',
@@ -116,12 +143,14 @@ export function renderReport(snapshot, network, findings = [], options = {}) {
     }),
     requests: requests.map(r => ({
       kind: r.kind || 'display',
+      isSra: Boolean(r.isSra || r.iu_parts || r.enc_prev_ius || r.prev_iu_szs),
       correlator: r.correlator || null,
       adUnits: r.adUnits || (r.iu ? [r.iu] : []),
       status: r.status ?? 200,
       duration: r.duration ?? null,
       gdpr: r.gdpr || null,
       gdpr_consent_length: r.gdpr_consent || 0,
+      tcString: r.tcString || null,
       npa: r.npa || null,
       ltd: r.ltd || null,
       rdp: r.rdp || null,
@@ -144,7 +173,7 @@ export function renderReport(snapshot, network, findings = [], options = {}) {
   lines.push(`- **Slots Defined**: ${slots.length}${frames.length ? ` (${mainSlotCount} in the main frame, ${frameSlotCount} in ${frames.length} iframe GPT instance(s))` : ''}`);
   lines.push(`- **GPT Instances**: ${gptInstances}${frames.length ? ` (1 main frame + ${frames.length} same-origin iframes)` : ''}`);
   lines.push(`- **Ad Requests (GAM)**: ${requests.length} (${requests.filter(r => r.kind === 'display').length} display, ${requests.filter(r => r.kind === 'video').length} video)`);
-  lines.push(`- **Consent State**: GDPR: \`${consentSummary.gdpr}\` | TC String: \`${consentSummary.tcStringPresent ? `present (${consentSummary.tcStringLength} chars)` : 'absent'}\` | NPA: \`${consentSummary.npa ? '1' : '0'}\``);
+  lines.push(`- **Consent State**: GDPR: \`${consentSummary.gdpr}\` | TC String: \`${consentSummary.tcStringPresent ? `present (${consentSummary.tcStringLength} chars)` : 'absent'}\` | NPA: \`${consentSummary.npa ? '1' : '0'}\` | TCF Status: \`${tcfAnalysis.status}\``);
   if (compliance.active) {
     const failedChecks = compliance.checks.filter(c => !c.passed).length;
     lines.push(`- **Publisher Compliance**: **${compliance.publisher}** — **${compliance.passed ? 'COMPLIANT ✅' : `NON-COMPLIANT ❌ (${failedChecks} requirement(s) failed)`}**`);
@@ -283,6 +312,47 @@ export function renderReport(snapshot, network, findings = [], options = {}) {
   const appendixSectionNum = compliance.active ? '6' : '5';
   lines.push(`## ${appendixSectionNum}. Appendix`);
   lines.push('');
+
+  // TCF v2 Consent & Purpose Analysis
+  lines.push('### TCF v2 Consent & Purpose Analysis');
+  lines.push('');
+  const statusBadge = tcfAnalysis.status === 'healthy' ? '✅ Healthy' : tcfAnalysis.status === 'error' ? '❌ Issues Detected' : '➖ Not Active';
+  lines.push(`- **TCF Status**: **${statusBadge}** — ${tcfAnalysis.statusSummary}`);
+  lines.push(`- **\`__tcfapi\` Present**: \`${tcfAnalysis.apiPresent ? 'true' : 'false'}\` | **GDPR Applies**: \`${tcfAnalysis.gdprApplies === null ? 'unknown' : String(tcfAnalysis.gdprApplies)}\``);
+  if (tcfAnalysis.cmpId !== null || tcfAnalysis.tcfPolicyVersion !== null || tcfAnalysis.eventStatus) {
+    lines.push(`- **CMP Details**: CMP ID: \`${tcfAnalysis.cmpId ?? 'n/a'}\` | CMP Version: \`${tcfAnalysis.cmpVersion ?? 'n/a'}\` | Policy Version: \`${tcfAnalysis.tcfPolicyVersion ?? 'n/a'}\` | Event Status: \`${tcfAnalysis.eventStatus || 'n/a'}\` | Publisher CC: \`${tcfAnalysis.publisherCC || 'n/a'}\``);
+  }
+  if (tcfAnalysis.googleVendor.consent !== null || tcfAnalysis.googleVendor.legitimateInterest !== null) {
+    lines.push(`- **Google Vendor (ID 755)**: Consent: \`${tcfAnalysis.googleVendor.consent === null ? 'n/a' : String(tcfAnalysis.googleVendor.consent)}\` | Legitimate Interest: \`${tcfAnalysis.googleVendor.legitimateInterest === null ? 'n/a' : String(tcfAnalysis.googleVendor.legitimateInterest)}\``);
+  }
+  if (tcfAnalysis.gamEligibility.personalizedAds !== null) {
+    lines.push(`- **GAM Ad Serving Eligibility**: Personalized Ads: \`${tcfAnalysis.gamEligibility.personalizedAds}\` | Non-Personalized Ads: \`${tcfAnalysis.gamEligibility.nonPersonalizedAds}\` | Limited Ads: \`${tcfAnalysis.gamEligibility.limitedAds}\``);
+  }
+  lines.push(`- **TC String (\`tcString\`)** (${tcfAnalysis.tcStringLength} chars, source: \`${tcfAnalysis.tcStringSource}\`): \`${tcfAnalysis.tcString || 'absent'}\``);
+  lines.push('');
+
+  if (tcfAnalysis.checks.length > 0) {
+    lines.push('#### TCF Health Checks');
+    lines.push('');
+    lines.push('| Check | Status | Details |');
+    lines.push('| :--- | :--- | :--- |');
+    for (const c of tcfAnalysis.checks) {
+      lines.push(`| ${c.name} | ${c.passed ? '✅ Passed' : '❌ **Failed**'} | ${c.details} |`);
+    }
+    lines.push('');
+  }
+
+  lines.push('#### TCF v2 Purposes (1–10)');
+  lines.push('');
+  lines.push('| Purpose | Name | Consent | Legitimate Interest | GAM Requirement |');
+  lines.push('| :--- | :--- | :--- | :--- | :--- |');
+  for (const p of tcfAnalysis.purposes) {
+    const cStr = p.consent === null ? '`n/a`' : (p.consent ? '**`true`** ✅' : '**`false`** ❌');
+    const liStr = p.legitimateInterest === null ? '`n/a`' : (p.legitimateInterest ? '**`true`** ✅' : '`false`');
+    lines.push(`| **Purpose ${p.id}** | ${p.name} | ${cStr} | ${liStr} | ${p.gamRole} |`);
+  }
+  lines.push('');
+
   lines.push('### Page-Level Targeting');
   lines.push('');
   const ptKeys = Object.keys(gpt.pageTargeting || {});
@@ -332,8 +402,8 @@ export function renderComparison(reports) {
   const lines = [];
   lines.push('# GPT Audit — Multi-Host Comparison');
   lines.push('');
-  lines.push('| Host | GPT Version | Slots | Ad Requests | Compliance | SRA | Prebid | Consent (GDPR/TC/NPA) | Unfilled Slots | Findings (H / M / L) |');
-  lines.push('| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |');
+  lines.push('| Host | GPT Version | Slots | Ad Requests | Compliance | SRA | Lazy Load | Initial Load | Prebid | Consent (GDPR/TC/NPA) | Unfilled Slots | Findings (H / M / L) |');
+  lines.push('| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |');
 
   for (const rep of reports) {
     const meta = rep.meta || {};
@@ -352,9 +422,11 @@ export function renderComparison(reports) {
     const slotCount = meta.slotCount ?? slots.length;
     const reqCount = meta.requestCount ?? requests.length;
 
-    const hasSra = requests.some(r => r.isSra || r.kind === 'display');
+    const hasSra = typeof meta.sra === 'boolean' ? meta.sra : requests.some(r => r.isSra === true);
     const sraStr = hasSra ? 'on' : 'off';
-    const prebidVer = rep.prebid?.version || 'none';
+    const lazyStr = meta.lazyLoad ? 'on' : 'off';
+    const initStr = meta.initialLoadDisabled ? 'disabled' : 'enabled';
+    const prebidVer = rep.prebid?.present ? (rep.prebid.version || 'present') : (rep.prebid?.version || 'none');
 
     let compStr = '-';
     if (compliance?.active) {
@@ -365,7 +437,7 @@ export function renderComparison(reports) {
     const unfilledCount = slots.filter(s => s.lineItemId === 'unfilled' || s.render?.isEmpty === true).length;
     const findingsStr = `${summary.high ?? 0}H / ${summary.medium ?? 0}M / ${summary.low ?? 0}L`;
 
-    lines.push(`| **${host}** | \`${gptVer}\` | ${slotCount} | ${reqCount} | ${compStr} | ${sraStr} | \`${prebidVer}\` | ${consentStr} | ${unfilledCount} | ${findingsStr} |`);
+    lines.push(`| **${host}** | \`${gptVer}\` | ${slotCount} | ${reqCount} | ${compStr} | ${sraStr} | ${lazyStr} | ${initStr} | \`${prebidVer}\` | ${consentStr} | ${unfilledCount} | ${findingsStr} |`);
   }
 
   lines.push('');

@@ -100,6 +100,7 @@ export function parseAdRequestUrl(url) {
     frm: p.get('frm'),
     gdpr: p.get('gdpr'),
     gdpr_consent: gdprConsentLength,
+    tcString: rawConsent || null,
     addtl_consent: p.get('addtl_consent'),
     us_privacy: p.get('us_privacy'),
     gpp: p.get('gpp'),

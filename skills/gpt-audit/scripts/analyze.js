@@ -18,6 +18,7 @@ import r07 from './rules/r07-mixed-correlators.js';
 import r08 from './rules/r08-initial-load-disabled-no-refresh.js';
 import r09 from './rules/r09-consent-mismatch.js';
 import r10 from './rules/r10-legacy-or-duplicate-gpt.js';
+import r13 from './rules/r13-pii-or-oversized-targeting.js';
 import r16 from './rules/r16-publisher-mandatory-params.js';
 import r17 from './rules/r17-gpt-idle-in-main-frame.js';
 import r18 from './rules/r18-shared-ad-unit-path.js';
@@ -33,6 +34,7 @@ const RULES = [
   { id: 'R08', run: r08 },
   { id: 'R09', run: r09 },
   { id: 'R10', run: r10 },
+  { id: 'R13', run: r13 },
   { id: 'R16', run: r16 },
   { id: 'R17', run: r17 },
   { id: 'R18', run: r18 }

@@ -1,13 +1,11 @@
-// R04: No requested size fits the viewport
+// R04: No requested size fits the viewport or container
 // Severity: Medium
-// Evidence: all sizes wider than viewport.w (1x1 and fluid fit any container)
+// Evidence: all sizes wider than viewport.w or than dom.boundingRect.width (1x1 and fluid fit any container)
 
 export default function r04ViewportFit(snapshot) {
   const findings = [];
   const slots = snapshot?.slots || [];
   const vpW = snapshot?.meta?.viewport?.w || 0;
-
-  if (vpW <= 0) return findings;
 
   for (const slot of slots) {
     const rawSizes = slot.sizes || [];
@@ -20,7 +18,7 @@ export default function r04ViewportFit(snapshot) {
     const fixedSizes = rawSizes.filter(s => Array.isArray(s) && s.length >= 2);
     if (!fixedSizes.length) continue;
 
-    const allWiderThanViewport = fixedSizes.every(s => s[0] > vpW);
+    const allWiderThanViewport = vpW > 0 && fixedSizes.every(s => s[0] > vpW);
 
     if (allWiderThanViewport) {
       findings.push({
@@ -29,6 +27,18 @@ export default function r04ViewportFit(snapshot) {
         slot: slot.elementId || null,
         evidence: `all requested sizes [${fixedSizes.map(s => `${s[0]}×${s[1]}`).join(', ')}] exceed viewport width (${vpW}px)`,
         fix: `configure responsive sizeMapping or add smaller creative sizes for narrow viewports`
+      });
+      continue;
+    }
+
+    const containerW = slot.dom?.boundingRect?.width || 0;
+    if (!slot.frame && slot.dom?.exists && slot.dom?.cssDisplay !== 'none' && containerW > 0 && fixedSizes.every(s => s[0] > containerW)) {
+      findings.push({
+        id: 'R04',
+        severity: 'medium',
+        slot: slot.elementId || null,
+        evidence: `all requested sizes [${fixedSizes.map(s => `${s[0]}×${s[1]}`).join(', ')}] exceed container #${slot.elementId || 'slot'} width (${containerW}px)`,
+        fix: `configure responsive sizeMapping or include creative sizes that fit within the ${containerW}px container`
       });
     }
   }
