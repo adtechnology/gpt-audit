@@ -11,6 +11,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { evaluateCompliance } from './rules/r16-publisher-mandatory-params.js';
+import { renderHtmlReport } from './report-html.js';
 
 export function renderReport(snapshot, network, findings = [], options = {}) {
   const meta = snapshot?.meta || {};
@@ -284,9 +285,12 @@ export function renderReport(snapshot, network, findings = [], options = {}) {
   lines.push('![Publisher Console Screenshot](console.png)');
   lines.push('');
 
+  const html = renderHtmlReport(snapshot, network, findings, jsonReport, compliance);
+
   return {
     markdown: lines.join('\n'),
-    json: jsonReport
+    json: jsonReport,
+    html
   };
 }
 
@@ -405,16 +409,18 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       config = JSON.parse(readFileSync('gpt-audit.config.json', 'utf8'));
     }
 
-    const { markdown, json } = renderReport(snapshot, network, findings, { config });
+    const { markdown, json, html } = renderReport(snapshot, network, findings, { config });
 
     if (outputDir) {
       mkdirSync(outputDir, { recursive: true });
       const mdPath = join(outputDir, 'report.md');
       const jsonPath = join(outputDir, 'report.json');
+      const htmlPath = join(outputDir, 'report.html');
 
       writeFileSync(mdPath, markdown, 'utf8');
       writeFileSync(jsonPath, JSON.stringify(json, null, 2), 'utf8');
-      console.log(`Saved report.md and report.json to ${outputDir}`);
+      writeFileSync(htmlPath, html, 'utf8');
+      console.log(`Saved report.md, report.json, and report.html to ${outputDir}`);
     } else {
       process.stdout.write(markdown + '\n');
     }

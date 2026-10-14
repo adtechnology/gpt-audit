@@ -149,12 +149,21 @@ test('analyze: triggers R01, R05, R06, R07, and R09 on synthetic fixture', async
   assert.equal(fR03, undefined, 'AdX / Open Bidding fill must not trigger R03');
 
   // Test report generation
-  const { markdown, json } = renderReport(snapshot, network, findings);
+  const { markdown, json, html } = renderReport(snapshot, network, findings);
   assert.ok(markdown.includes('# GPT Audit Report: https://fixture.example.com/article'));
   assert.ok(markdown.includes('High Severity (3)'));
   assert.ok(markdown.includes('Medium Severity (1)'));
   assert.ok(markdown.includes('Low Severity (1)'));
   assert.ok(markdown.includes('AdX/OB (7777777)')); // Shows sourceAgnosticLineItemId for backfill slot
+
+  // Test HTML report generation
+  assert.ok(typeof html === 'string' && html.length > 500);
+  assert.ok(html.includes('<!DOCTYPE html>'));
+  assert.ok(html.includes('class="hero"'));
+  assert.ok(html.includes('fixture.example.com'));
+  assert.ok(html.includes('gauge-svg')); // Health Score gauge
+  assert.ok(html.includes('tab-slots'));
+  assert.ok(html.includes('tab-findings'));
 
   // Test comparison generation
   const compMd = renderComparison([json]);

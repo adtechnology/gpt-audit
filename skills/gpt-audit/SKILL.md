@@ -16,7 +16,7 @@ the judging, so the same input gives the same report in Antigravity, Claude Code
 ## Outputs, per URL, in `out/<host>/`
 
 `snapshot-initial.json`, `snapshot.json`, `network-raw.txt`, `network.json`, `findings.json`,
-`report.md`, `report.json`, `page.png`, `console.png`. Several URLs: also `out/comparison.md`.
+`report.md`, `report.json`, `report.html`, `page.png`, `console.png`. Several URLs: also `out/comparison.md`.
 
 ## Procedure
 

@@ -110,9 +110,10 @@ out/
     ├── snapshot.json                  # In-page pubads, slots, targeting, and events
     ├── network-raw.txt                # Verbatim MCP tool output from DevTools
     ├── network.json                   # Structured GAM requests (SRA, params, consent, kind)
-    ├── findings.json                  # Output of rules R01-R10 (id, severity, slot, evidence, fix)
+    ├── findings.json                  # Output of rules R01-R16 (id, severity, slot, evidence, fix)
     ├── report.md                      # Human-readable Markdown audit report
     ├── report.json                    # Machine-readable JSON summary for CI/CD
+    ├── report.html                    # Interactive visual HTML report with Hero, KPIs & health score
     ├── page.png                       # Initial viewport screenshot
     └── console.png                    # Google Publisher Console screenshot
 ```
