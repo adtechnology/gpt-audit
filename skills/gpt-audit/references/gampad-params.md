@@ -34,3 +34,18 @@ Ad requests go to `https://securepubads.g.doubleclick.net/gampad/ads?...` (older
 ## Library Loads
 - `/tag/js/gpt.js`: Current standard host is `securepubads.g.doubleclick.net/tag/js/gpt.js` (legacy: `googletagservices.com`, flagged by R10).
 - `pubads_impl*.js`: The Google Ad Manager implementation script loaded asynchronously by `gpt.js`. Recorded with status and load timing.
+
+## Added in network-extract 0.2.0
+
+| Parameter | Field in `network.json` | Meaning |
+| --- | --- | --- |
+| `prev_scp` | `prev_scp` (array, one object per slot) | slot-level key-values of every slot in the request, segments separated by `\|`; the place where ad-server passbacks copy their own targeting (e.g. `GDPR_APPLIES`, `miSlot`) |
+| `dids` | `dids` | div ids of the slots in the request, in order |
+| `impl` | `impl` | render implementation: `fif` friendly iframe, `ifr` iframe, `s` (video) |
+| `frm` | `frm` | frame context bit field; > 0 when GPT runs inside an iframe |
+| response header `google-lineitem-id` | `fill.lineItemIds` | line item(s) that filled the request; `-1` = AdX / Open Bidding backfill |
+| response header `google-creative-id` | `fill.creativeIds` | creative(s) served; `-1` for backfill |
+| response header `google-mediationgroup-id` | `fill.mediationGroupId` | yield group that won (Open Bidding / mediation), `-2` when none |
+| response header `content-length`, `date` | `fill.contentLength`, `fill.date` | size of the response (an empty ldjh response is ~1–2 KB, a filled one tens of KB) and the server time |
+
+`fill` is `null` for rows that came from a list line without a `get_network_request` block.

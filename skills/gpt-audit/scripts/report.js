@@ -19,6 +19,10 @@ export function renderReport(snapshot, network, findings = [], options = {}) {
   const slots = snapshot?.slots || [];
   const requests = network?.requests || [];
   const neighbours = snapshot?.neighbours || {};
+  const frames = Array.isArray(snapshot?.frames) ? snapshot.frames : [];
+  const mainSlotCount = typeof gpt.mainFrameSlotCount === 'number' ? gpt.mainFrameSlotCount : slots.filter(s => !s.frame).length;
+  const frameSlotCount = slots.length - mainSlotCount;
+  const gptInstances = typeof gpt.gptInstances === 'number' ? gpt.gptInstances : (gpt.present ? 1 : 0) + frames.length;
 
   let config = options?.config || null;
   if (!config && options?.configPath && existsSync(options.configPath)) {
@@ -59,9 +63,22 @@ export function renderReport(snapshot, network, findings = [], options = {}) {
       collectorVersion: meta.collectorVersion || '0.1.0',
       gptVersion: gpt.version || null,
       slotCount: slots.length,
+      mainFrameSlotCount: mainSlotCount,
+      frameSlotCount,
+      gptInstances,
       requestCount: requests.length,
       consent: consentSummary
     },
+    frames: frames.map(f => ({
+      iframeId: f.iframeId || '',
+      iframeName: f.iframeName || '',
+      href: f.href || '',
+      depth: f.depth ?? null,
+      version: f.version || null,
+      pubadsReady: f.pubadsReady ?? null,
+      legacyHost: (f.scriptTags || []).some(t => (t.src || '').includes('googletagservices.com')),
+      slotCount: f.slotCount ?? slots.filter(s => s.frame === f.iframeId).length
+    })),
     summary: {
       high: highFindings.length,
       medium: medFindings.length,
@@ -93,7 +110,8 @@ export function renderReport(snapshot, network, findings = [], options = {}) {
         safeFrame: s.iframe?.safeFrame ?? false,
         inViewportOnLoad: s.dom?.inViewportOnLoad ?? false,
         render: s.render || null,
-        targetingKeys: Object.keys(s.targeting || {})
+        targetingKeys: Object.keys(s.targeting || {}),
+        frame: s.frame || null
       };
     }),
     requests: requests.map(r => ({
@@ -107,7 +125,9 @@ export function renderReport(snapshot, network, findings = [], options = {}) {
       npa: r.npa || null,
       ltd: r.ltd || null,
       rdp: r.rdp || null,
-      ppid: r.ppid || false
+      ppid: r.ppid || false,
+      pvsid: r.pvsid || null,
+      fill: r.fill || null
     })),
     findings
   };
@@ -121,7 +141,8 @@ export function renderReport(snapshot, network, findings = [], options = {}) {
   lines.push(`- **URL**: ${meta.url || 'N/A'}`);
   lines.push(`- **Audit Timestamp**: ${meta.timestamp || new Date().toISOString()}`);
   lines.push(`- **GPT Version**: \`${gpt.version || 'not loaded'}\``);
-  lines.push(`- **Slots Defined**: ${slots.length}`);
+  lines.push(`- **Slots Defined**: ${slots.length}${frames.length ? ` (${mainSlotCount} in the main frame, ${frameSlotCount} in ${frames.length} iframe GPT instance(s))` : ''}`);
+  lines.push(`- **GPT Instances**: ${gptInstances}${frames.length ? ` (1 main frame + ${frames.length} same-origin iframes)` : ''}`);
   lines.push(`- **Ad Requests (GAM)**: ${requests.length} (${requests.filter(r => r.kind === 'display').length} display, ${requests.filter(r => r.kind === 'video').length} video)`);
   lines.push(`- **Consent State**: GDPR: \`${consentSummary.gdpr}\` | TC String: \`${consentSummary.tcStringPresent ? `present (${consentSummary.tcStringLength} chars)` : 'absent'}\` | NPA: \`${consentSummary.npa ? '1' : '0'}\``);
   if (compliance.active) {
@@ -150,8 +171,8 @@ export function renderReport(snapshot, network, findings = [], options = {}) {
   const slotSectionNum = compliance.active ? '3' : '2';
   lines.push(`## ${slotSectionNum}. Slot Table`);
   lines.push('');
-  lines.push('| Element ID | Ad Unit Path | Requested Sizes | Rendered Size | Line Item ID | Creative ID | Advertiser ID | SafeFrame | In Viewport | Targeting Keys |');
-  lines.push('| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |');
+  lines.push('| Element ID | Frame | Ad Unit Path | Requested Sizes | Rendered Size | Line Item ID | Creative ID | Advertiser ID | SafeFrame | In Viewport | Targeting Keys |');
+  lines.push('| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |');
 
   for (const slot of jsonReport.slots) {
     const szReq = (slot.sizes || []).map(s => Array.isArray(s) ? `${s[0]}×${s[1]}` : s).join(', ') || 'none';
@@ -163,9 +184,22 @@ export function renderReport(snapshot, network, findings = [], options = {}) {
     const creative = slot.creativeId !== null ? String(slot.creativeId) : 'null';
     const adv = slot.advertiserId !== null ? String(slot.advertiserId) : 'null';
 
-    lines.push(`| \`${slot.elementId}\` | \`${slot.adUnitPath}\` | ${szReq} | ${szRend} | ${lineItem} | ${creative} | ${adv} | ${sf} | ${vp} | ${tgKeys || 'none'} |`);
+    const frameCell = slot.frame ? `\`${slot.frame.length > 28 ? slot.frame.slice(0, 25) + '…' : slot.frame}\`` : 'main';
+    lines.push(`| \`${slot.elementId}\` | ${frameCell} | \`${slot.adUnitPath}\` | ${szReq} | ${szRend} | ${lineItem} | ${creative} | ${adv} | ${sf} | ${vp} | ${tgKeys || 'none'} |`);
   }
   lines.push('');
+
+  // GPT instances in same-origin iframes (ad-server passbacks, wrappers)
+  if (frames.length > 0) {
+    lines.push('### GPT Instances in iframes');
+    lines.push('');
+    lines.push('| Iframe ID | Depth | GPT Version | gpt.js Host | Slots |');
+    lines.push('| :--- | :--- | :--- | :--- | :--- |');
+    for (const f of jsonReport.frames) {
+      lines.push(`| \`${f.iframeId || '(no id)'}\` | ${f.depth ?? '-'} | \`${f.version || 'unknown'}\` | ${f.legacyHost ? 'googletagservices.com (legacy)' : 'securepubads'} | ${f.slotCount} |`);
+    }
+    lines.push('');
+  }
 
   // 3b. Detailed Render Information for Rendered Slots
   lines.push('### Slot Render Details (Event Data)');

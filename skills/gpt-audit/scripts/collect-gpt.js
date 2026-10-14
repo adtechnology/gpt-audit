@@ -1,4 +1,4 @@
-// collect-gpt.js — in-page snapshot collector.
+// collect-gpt.js — in-page snapshot collector (main frame + same-origin iframes).
 async function collectGpt(opts = {}) {
   const errors = [];
   const safe = (fn, f, d = null) => {
@@ -37,84 +37,116 @@ async function collectGpt(opts = {}) {
   }, 'probe');
 
   const vp = { w: window.innerWidth || 0, h: window.innerHeight || 0, dpr: window.devicePixelRatio || 1 };
-  const meta = { url: trunc(location.href, 500), title: trunc(document.title, 200), viewport: vp, userAgent: trunc(navigator.userAgent, 300), timestamp: new Date().toISOString(), collectorVersion: '0.1.0' };
+  const meta = { url: trunc(location.href, 500), title: trunc(document.title, 200), viewport: vp, userAgent: trunc(navigator.userAgent, 300), timestamp: new Date().toISOString(), collectorVersion: '0.2.0' };
 
-  const scripts = Array.from(document.querySelectorAll('script[src*="/tag/js/gpt.js"], script[src*="googletagservices.com"]'));
-  const scriptTags = scripts.map(s => ({ src: trunc(s.src, 300), async: !!s.async, defer: !!s.defer, inHead: s.parentNode === document.head }));
-  const legacyHost = scripts.some(s => (s.src || '').includes('googletagservices.com'));
+  const tagsIn = (doc, frame) => Array.from(doc.querySelectorAll('script[src*="/tag/js/gpt.js"], script[src*="googletagservices.com/tag/"]')).map(s => ({ src: trunc(s.src, 300), async: !!s.async, defer: !!s.defer, inHead: s.parentNode === doc.head, frame }));
+  const scriptTags = safe(() => tagsIn(document, null), 'gpt.scriptTags', []);
+  const isLegacy = t => (t.src || '').includes('googletagservices.com/tag/');
 
   const gt = window.googletag;
   const hasGpt = typeof gt !== 'undefined';
-  const gptInfo = { present: hasGpt, version: null, apiReady: false, pubadsReady: false, scriptTags, legacyHost, cmdQueueLength: 0, config: {}, initialLoadDisabled: false, pageTargeting: {} };
-
-  if (!hasGpt) {
-    const adElements = Array.from(document.querySelectorAll('div[id*="ad"], div[id*="gpt"], div[data-google-query-id], div[class*="ad-slot"]')).slice(0, 60).map(e => ({ elementId: e.id || null, className: e.className || null, hasQueryId: e.hasAttribute('data-google-query-id') }));
-    return { meta, gpt: gptInfo, slots: [], adElements, neighbours: { prebid: { present: typeof window.pbjs !== 'undefined' }, consent: {}, apstag: { present: typeof window.apstag !== 'undefined' } }, events: window.__gptAudit?.events || [], errors };
-  }
-
-  gptInfo.version = safe(() => gt.getVersion?.(), 'gpt.version');
-  gptInfo.apiReady = safe(() => !!gt.apiReady, 'gpt.apiReady', false);
-  gptInfo.pubadsReady = safe(() => !!gt.pubadsReady, 'gpt.pubadsReady', false);
-  gptInfo.cmdQueueLength = safe(() => (Array.isArray(gt.cmd) ? gt.cmd.length : 0), 'gpt.cmdQueueLength', 0);
-
-  const pubads = safe(() => gt.pubads?.(), 'gpt.pubads');
-  if (pubads) {
-    gptInfo.initialLoadDisabled = safe(() => pubads.isInitialLoadDisabled?.(), 'gpt.initialLoadDisabled', false);
-    gptInfo.config = safe(() => pubads.getConfig?.() || gt.getConfig?.() || {}, 'gpt.config', {});
-    safe(() => {
-      for (const k of (pubads.getTargetingKeys?.() || []).slice(0, 20)) gptInfo.pageTargeting[k] = trunc(pubads.getTargeting(k), 200);
-    }, 'gpt.pageTargeting');
-  }
-
-  const normSizes = s => !s || s === 'fluid' ? s || [] : !Array.isArray(s) ? [] : s.map(x => x === 'fluid' ? 'fluid' : Array.isArray(x) ? (+x[0] === x[0] ? [x[0], x[1]] : normSizes(x)) : (x?.getWidth && x?.getHeight ? [x.getWidth(), x.getHeight()] : x)).filter(Boolean);
-
-  const rawSlots = safe(() => pubads?.getSlots?.() || [], 'slots', []);
+  const gptInfo = { present: hasGpt, version: null, apiReady: false, pubadsReady: false, scriptTags, legacyHost: scriptTags.some(isLegacy), cmdQueueLength: 0, config: {}, initialLoadDisabled: false, pageTargeting: {}, mainFrameSlotCount: 0 };
   const allEvents = window.__gptAudit?.events || [];
-  const slots = [];
+  const normSizes = s => !s || s === 'fluid' ? s || [] : !Array.isArray(s) ? [] : s.map(x => x === 'fluid' ? 'fluid' : Array.isArray(x) ? (+x[0] === x[0] ? [x[0], x[1]] : normSizes(x)) : (x?.getWidth && x?.getHeight ? [x.getWidth(), x.getHeight()] : x)).filter(Boolean);
   let hbKeysCount = 0;
 
-  for (const s of rawSlots.slice(0, 60)) {
-    const elementId = safe(() => s.getSlotElementId?.(), 'slot.elementId');
-    const adUnitPath = safe(() => s.getAdUnitPath?.(), `slot[${elementId}].adUnitPath`);
-    const sizes = safe(() => normSizes(s.getSizes?.()), `slot[${elementId}].sizes`, []);
-    const targeting = {};
-    safe(() => {
-      for (const k of (s.getTargetingKeys?.() || []).slice(0, 20)) {
-        if (k.startsWith('hb_')) hbKeysCount++;
-        targeting[k] = trunc(s.getTargeting(k), 200);
-      }
-    }, `slot[${elementId}].targeting`);
-    const categoryExclusions = safe(() => s.getCategoryExclusions?.() || [], `slot[${elementId}].categoryExclusions`, []);
-    const response = safe(() => {
-      const r = s.getResponseInformation?.();
-      return r ? { advertiserId: r.advertiserId ?? null, campaignId: r.campaignId ?? null, lineItemId: r.lineItemId ?? null, creativeId: r.creativeId ?? null, creativeTemplateId: r.creativeTemplateId ?? null } : null;
-    }, `slot[${elementId}].response`);
-
-    const render = pickRender(allEvents.filter(e => e.name === 'slotRenderEnded' && e.slotElementId === elementId).pop());
-
-    const el = elementId ? document.getElementById(elementId) : null;
-    const dom = { exists: !!el, boundingRect: null, inViewportOnLoad: false, cssDisplay: null, reservedHeight: false, queryId: null };
-    const iframeInfo = { present: false, w: 0, h: 0, safeFrame: false, name: '' };
-    if (el) {
+  // Slots of one GPT instance; frame = iframe id or null.
+  const collectSlots = (pubads, doc, frame) => {
+    const out = [];
+    for (const s of (safe(() => pubads?.getSlots?.() || [], 'slots', []) || []).slice(0, 60)) {
+      const elementId = safe(() => s.getSlotElementId?.(), 'slot.elementId');
+      const adUnitPath = safe(() => s.getAdUnitPath?.(), `slot[${elementId}].adUnitPath`);
+      const sizes = safe(() => normSizes(s.getSizes?.()), `slot[${elementId}].sizes`, []);
+      const targeting = {};
       safe(() => {
-        const b = el.getBoundingClientRect();
-        dom.boundingRect = { x: Math.round(b.x), y: Math.round(b.y), width: Math.round(b.width), height: Math.round(b.height), top: Math.round(b.top), right: Math.round(b.right), bottom: Math.round(b.bottom), left: Math.round(b.left) };
-        dom.inViewportOnLoad = b.top < vp.h && b.bottom > 0 && b.left < vp.w && b.right > 0;
-        const cs = window.getComputedStyle(el);
-        dom.cssDisplay = cs.display;
-        dom.reservedHeight = (parseFloat(cs.minHeight) || parseFloat(el.style.height) || 0) > 0;
-        dom.queryId = el.getAttribute('data-google-query-id') || null;
-        const ifr = el.querySelector('iframe');
-        if (ifr) {
-          iframeInfo.present = true;
-          iframeInfo.w = ifr.offsetWidth || +ifr.width || 0;
-          iframeInfo.h = ifr.offsetHeight || +ifr.height || 0;
-          iframeInfo.safeFrame = `${ifr.src} ${ifr.id} ${ifr.name}`.toLowerCase().includes('safeframe');
-          iframeInfo.name = trunc(ifr.name || ifr.id || '', 100);
+        for (const k of (s.getTargetingKeys?.() || []).slice(0, 20)) {
+          if (k.startsWith('hb_')) hbKeysCount++;
+          targeting[k] = trunc(s.getTargeting(k), 200);
         }
-      }, `slot[${elementId}].dom`);
+      }, `slot[${elementId}].targeting`);
+      const categoryExclusions = safe(() => s.getCategoryExclusions?.() || [], `slot[${elementId}].categoryExclusions`, []);
+      const response = safe(() => {
+        const r = s.getResponseInformation?.();
+        return r ? { advertiserId: r.advertiserId ?? null, campaignId: r.campaignId ?? null, lineItemId: r.lineItemId ?? null, creativeId: r.creativeId ?? null, creativeTemplateId: r.creativeTemplateId ?? null, isBackfill: r.isBackfill ?? null, yieldGroupIds: r.yieldGroupIds ?? null } : null;
+      }, `slot[${elementId}].response`);
+      let render = pickRender(allEvents.filter(e => e.name === 'slotRenderEnded' && e.slotElementId === elementId).pop());
+      // no probe events in iframes: derive render from response.
+      const el = elementId ? doc.getElementById(elementId) : null;
+      const dom = { exists: !!el, boundingRect: null, inViewportOnLoad: false, cssDisplay: null, reservedHeight: false, queryId: null };
+      const iframeInfo = { present: false, w: 0, h: 0, safeFrame: false, name: '' };
+      if (el) {
+        safe(() => {
+          const b = el.getBoundingClientRect();
+          dom.boundingRect = { x: Math.round(b.x), y: Math.round(b.y), width: Math.round(b.width), height: Math.round(b.height), top: Math.round(b.top), right: Math.round(b.right), bottom: Math.round(b.bottom), left: Math.round(b.left) };
+          dom.inViewportOnLoad = !frame && b.top < vp.h && b.bottom > 0 && b.left < vp.w && b.right > 0;
+          const cs = doc.defaultView.getComputedStyle(el);
+          dom.cssDisplay = cs.display;
+          dom.reservedHeight = (parseFloat(cs.minHeight) || parseFloat(el.style.height) || 0) > 0;
+          dom.queryId = el.getAttribute('data-google-query-id') || null;
+          const ifr = el.querySelector('iframe');
+          if (ifr) {
+            iframeInfo.present = true;
+            iframeInfo.w = ifr.offsetWidth || +ifr.width || 0;
+            iframeInfo.h = ifr.offsetHeight || +ifr.height || 0;
+            iframeInfo.safeFrame = `${ifr.src} ${ifr.id} ${ifr.name}`.toLowerCase().includes('safeframe');
+            iframeInfo.name = trunc(ifr.name || ifr.id || '', 100);
+          }
+        }, `slot[${elementId}].dom`);
+      }
+      if (!render && frame && response) render = { ...pickRender({}), isEmpty: false, size: iframeInfo.present ? [iframeInfo.w, iframeInfo.h] : null, isBackfill: response.isBackfill, lineItemId: response.lineItemId, creativeId: response.creativeId, advertiserId: response.advertiserId, campaignId: response.campaignId, yieldGroupIds: response.yieldGroupIds };
+      out.push({ elementId, adUnitPath, sizes, targeting, categoryExclusions, response, render, dom, iframe: iframeInfo, frame });
     }
-    slots.push({ elementId, adUnitPath, sizes, targeting, categoryExclusions, response, render, dom, iframe: iframeInfo });
+    return out;
+  };
+
+  let slots = [];
+  if (hasGpt) {
+    gptInfo.version = safe(() => gt.getVersion?.(), 'gpt.version');
+    gptInfo.apiReady = safe(() => !!gt.apiReady, 'gpt.apiReady', false);
+    gptInfo.pubadsReady = safe(() => !!gt.pubadsReady, 'gpt.pubadsReady', false);
+    gptInfo.cmdQueueLength = safe(() => (Array.isArray(gt.cmd) ? gt.cmd.length : 0), 'gpt.cmdQueueLength', 0);
+    const pubads = safe(() => gt.pubads?.(), 'gpt.pubads');
+    if (pubads) {
+      gptInfo.initialLoadDisabled = safe(() => pubads.isInitialLoadDisabled?.(), 'gpt.initialLoadDisabled', false);
+      gptInfo.config = safe(() => pubads.getConfig?.() || gt.getConfig?.() || {}, 'gpt.config', {});
+      safe(() => {
+        for (const k of (pubads.getTargetingKeys?.() || []).slice(0, 20)) gptInfo.pageTargeting[k] = trunc(pubads.getTargeting(k), 200);
+      }, 'gpt.pageTargeting');
+    }
+    slots = collectSlots(pubads, document, null);
+    gptInfo.mainFrameSlotCount = slots.length;
+  }
+
+  // Same-origin iframes with their own googletag (passbacks, wrappers): depth 3, max 40.
+  const frames = [];
+  safe(() => {
+    let seen = 0;
+    const walk = (win, depth) => {
+      for (let i = 0; i < win.frames.length && seen < 40; i++) {
+        const f = win.frames[i];
+        let fd, fgt;
+        try { fd = f.document; fgt = f.googletag; } catch (_) { continue; }
+        if (fgt && typeof fgt.getVersion === 'function') {
+          seen++;
+          const el = safe(() => f.frameElement, 'frames.element');
+          const rec = { iframeId: trunc(el?.id || '', 100), iframeName: trunc(el?.name || '', 100), href: trunc(safe(() => f.location.href, 'frames.href', ''), 200), depth, version: safe(() => fgt.getVersion(), 'frames.version'), pubadsReady: !!fgt.pubadsReady, scriptTags: safe(() => tagsIn(fd, el?.id || `frame${seen}`), 'frames.scriptTags', []), slotCount: 0 };
+          const fs = collectSlots(safe(() => fgt.pubads?.(), 'frames.pubads'), fd, rec.iframeId || `frame${seen}`);
+          rec.slotCount = fs.length;
+          slots.push(...fs);
+          frames.push(rec);
+          scriptTags.push(...rec.scriptTags);
+        }
+        if (depth < 3) walk(f, depth + 1);
+      }
+    };
+    walk(window, 1);
+  }, 'frames');
+  gptInfo.legacyHost = scriptTags.some(isLegacy);
+  gptInfo.gptInstances = (hasGpt ? 1 : 0) + frames.length;
+
+  if (!hasGpt && frames.length === 0) {
+    const adElements = Array.from(document.querySelectorAll('div[id*="ad"], div[id*="gpt"], div[data-google-query-id], div[class*="ad-slot"]')).slice(0, 60).map(e => ({ elementId: e.id || null, className: e.className || null, hasQueryId: e.hasAttribute('data-google-query-id') }));
+    return { meta, gpt: gptInfo, slots: [], frames, adElements, neighbours: { prebid: { present: typeof window.pbjs !== 'undefined' }, consent: {}, apstag: { present: typeof window.apstag !== 'undefined' } }, events: allEvents, errors };
   }
 
   const pb = window.pbjs;
@@ -137,44 +169,23 @@ async function collectGpt(opts = {}) {
     gpp: { present: typeof window.__gpp === 'function', sections: null },
     usp: { present: typeof window.__uspapi === 'function' }
   };
-
-  if (consent.tcf.present) {
-    try {
-      await new Promise(res => {
-        const t = setTimeout(res, 600);
-        try {
-          window.__tcfapi('getTCData', 2, (tc, ok) => {
-            clearTimeout(t);
-            if (ok && tc) {
-              consent.tcf.gdprApplies = typeof tc.gdprApplies === 'boolean' ? tc.gdprApplies : null;
-              consent.tcf.tcStringLength = (tc.tcString || '').length;
-              consent.tcf.cmpId = tc.cmpId ?? null;
-              consent.tcf.purpose1 = !!tc.purpose?.consents?.[1];
-            }
-            res();
-          });
-        } catch (_) { clearTimeout(t); res(); }
-      });
-    } catch (e) { errors.push({ field: 'neighbours.consent.tcf', message: e.message }); }
-  }
-
-  if (consent.gpp.present) {
-    try {
-      await new Promise(res => {
-        const t = setTimeout(res, 300);
-        try {
-          window.__gpp('ping', (p, ok) => {
-            clearTimeout(t);
-            if (ok && p) consent.gpp.sections = p.applicableSections || null;
-            res();
-          });
-        } catch (_) { clearTimeout(t); res(); }
-      });
-    } catch (e) { errors.push({ field: 'neighbours.consent.gpp', message: e.message }); }
-  }
+  const ask = (fn, ms, field) => new Promise(res => {
+    const t = setTimeout(res, ms);
+    try { fn(() => { clearTimeout(t); res(); }); } catch (e) { errors.push({ field, message: e.message }); clearTimeout(t); res(); }
+  });
+  if (consent.tcf.present) await ask(done => window.__tcfapi('getTCData', 2, (tc, ok) => {
+    if (ok && tc) {
+      consent.tcf.gdprApplies = typeof tc.gdprApplies === 'boolean' ? tc.gdprApplies : null;
+      consent.tcf.tcStringLength = (tc.tcString || '').length;
+      consent.tcf.cmpId = tc.cmpId ?? null;
+      consent.tcf.purpose1 = !!tc.purpose?.consents?.[1];
+    }
+    done();
+  }), 600, 'neighbours.consent.tcf');
+  if (consent.gpp.present) await ask(done => window.__gpp('ping', (p, ok) => { if (ok && p) consent.gpp.sections = p.applicableSections || null; done(); }), 300, 'neighbours.consent.gpp');
 
   return {
-    meta, gpt: gptInfo, slots,
+    meta, gpt: gptInfo, slots, frames,
     neighbours: { prebid, consent, apstag: { present: typeof window.apstag !== 'undefined' } },
     events: allEvents.slice(0, 200),
     errors

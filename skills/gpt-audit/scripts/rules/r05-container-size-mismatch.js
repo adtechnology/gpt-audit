@@ -1,6 +1,7 @@
 // R05: Container size differs from rendered creative
 // Severity: Medium
-// Evidence: dom.rect vs iframe.w/h differ by more than 2 px, or reservedHeight false (1x1 and fluid exempt)
+// Evidence: dom.rect vs iframe.w/h differ by more than 2 px, or reservedHeight false (1x1 and fluid exempt;
+//           reservedHeight is only judged for main-frame slots, slot.frame === null)
 
 export default function r05ContainerSizeMismatch(snapshot) {
   const findings = [];
@@ -20,8 +21,9 @@ export default function r05ContainerSizeMismatch(snapshot) {
     if (ifrW <= 1 && ifrH <= 1) continue;
     if (!slot.dom?.exists) continue;
 
-    // Check reservedHeight on container
-    if (slot.dom.reservedHeight === false) {
+    // Check reservedHeight on container (not for slots inside iframes: the parent page reserves that space,
+    // which the collector cannot see from inside the frame)
+    if (slot.dom.reservedHeight === false && !slot.frame) {
       findings.push({
         id: 'R05',
         severity: 'medium',

@@ -56,7 +56,7 @@ The subagent executes the full audit pipeline asynchronously, freeing your conve
 
 ---
 
-## 3. The 10-Step Audit Procedure
+## 3. The 11-Step Audit Procedure
 
 When triggered, the agent executes the procedure defined in `skills/gpt-audit/SKILL.md`:
 
@@ -64,25 +64,27 @@ When triggered, the agent executes the procedure defined in `skills/gpt-audit/SK
 flowchart TD
     A[1. Check Tools & Capabilities] --> B[2. Open URL in Isolated Chrome]
     B --> C[3. Accept Consent Dialog CMP]
-    C --> D[4. Capture Full Page Screenshot]
-    D --> E[5. In-Page Snapshot Pass 1 probe=true]
-    E --> F[6. Scroll Down Page & Pass 2 probe=false]
-    F --> G[7. Extract Network Requests to network.json]
-    G --> H[8. Run Rules R01-R10 via analyze.js]
-    H --> I[9. Generate report.md and report.json]
-    I --> J[10. Open Publisher Console & Screenshot]
+    C --> C2[4. Fetch gpt.js / pubads_impl request details early]
+    C2 --> D[5. Capture Full Page Screenshot]
+    D --> E[6. In-Page Snapshot Pass 1 probe=true]
+    E --> F[7. Scroll Down Page & Pass 2 probe=false]
+    F --> G[8. Extract Network Requests to network.json]
+    G --> H[9. Run Rules R01-R10, R16-R18 via analyze.js]
+    H --> I[10. Generate report.md, report.json, report.html]
+    I --> J[11. Open Publisher Console & Screenshot]
 ```
 
 1. **Verify MCP Tools**: Validates `navigate_page`, `evaluate_script`, `list_network_requests`, `get_network_request`, `take_screenshot`.
 2. **Navigate with Pre-Listeners**: Injects `init-listeners.js` as `initScript` before page scripts execute to guarantee initial `slotRequested` and `slotResponseReceived` events are recorded.
-3. **Handle Consent (CMP)**: Automatically clicks "Accept all" if an IAB TCF / Sourcepoint / OneTrust banner appears.
-4. **Screenshot**: Saves `out/<host>/page.png`.
-5. **Initial Snapshot**: Runs `collectGpt({ probe: true })` inside page.
-6. **Scroll & Settle**: Scrolls in 600 px increments to trigger lazy-loaded slots, then captures the final snapshot with probe events (`out/<host>/snapshot.json`).
-7. **Network Harvest**: Calls `list_network_requests` and `get_network_request` for GAM ad calls (`gampad/ads`) and libraries (`gpt.js`, `pubads_impl`), saving verbatim tool output to `out/<host>/network-raw.txt`, then parses into `out/<host>/network.json`.
-8. **Analyze**: Runs `analyze.js` applying rules R01–R10 to produce `out/<host>/findings.json`.
-9. **Report**: Runs `report.js` to create `report.md` and `report.json` (and `comparison.md` if multiple URLs).
-10. **Publisher Console**: Evaluates `googletag.openConsole()`, captures `out/<host>/console.png`.
+3. **Handle Consent (CMP)**: Automatically clicks "Accept all" if an IAB TCF / Sourcepoint / OneTrust banner appears. Dialogs rendered in a cross-origin iframe are reached through a verbose accessibility snapshot. Network idle is detected with a `PerformanceObserver`, not the capped resource buffer.
+4. **Library Requests, Early**: Fetches the `gpt.js` and `pubads_impl` request details right after consent, before the DevTools request buffer (~400 entries) evicts them on ad-heavy pages.
+5. **Screenshot**: Saves `out/<host>/page.png`.
+6. **Initial Snapshot**: Runs `collectGpt({ probe: true })` inside the page. The collector reads the main-frame `googletag` and every same-origin iframe with its own GPT (ad-server passbacks, wrappers); those slots carry a `frame` field and the instances are listed in `frames[]`.
+7. **Scroll & Settle**: Scrolls in 600 px increments to trigger lazy-loaded slots, then captures the final snapshot with probe events (`out/<host>/snapshot.json`).
+8. **Network Harvest**: Calls `list_network_requests` and `get_network_request` for GAM ad calls (`gampad/ads`) and libraries (`gpt.js`, `pubads_impl`), saving verbatim tool output to `out/<host>/network-raw.txt` (list rows and request blocks may be mixed; truncated rows are skipped), then parses into `out/<host>/network.json` including the GAM fill headers.
+9. **Analyze**: Runs `analyze.js` applying rules R01–R10 and R16–R18 to produce `out/<host>/findings.json`.
+10. **Report**: Runs `report.js` to create `report.md`, `report.json` and `report.html` (and `comparison.md` if multiple URLs).
+11. **Publisher Console**: Evaluates `googletag.openConsole()`, captures `out/<host>/console.png`. "No ad units found" while `frames[]` is non-empty means GAM runs only inside iframes (rule R17).
 
 ---
 
@@ -110,7 +112,7 @@ out/
     ├── snapshot.json                  # In-page pubads, slots, targeting, and events
     ├── network-raw.txt                # Verbatim MCP tool output from DevTools
     ├── network.json                   # Structured GAM requests (SRA, params, consent, kind)
-    ├── findings.json                  # Output of rules R01-R16 (id, severity, slot, evidence, fix)
+    ├── findings.json                  # Output of rules R01-R10, R16-R18 (id, severity, slot, evidence, fix)
     ├── report.md                      # Human-readable Markdown audit report
     ├── report.json                    # Machine-readable JSON summary for CI/CD
     ├── report.html                    # Interactive visual HTML report with Hero, KPIs & health score

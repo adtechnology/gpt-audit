@@ -2,9 +2,12 @@
 // network-extract.js — Phase 1 (see docs/PLAN.md, "Phase 1 — collector").
 //
 // CLI: node network-extract.js <network-raw.txt> -o <network.json>
-// Input: verbatim output from list_network_requests / get_network_request saved in network-raw.txt.
-// Output: one row per request to */gampad/ads with status, start time, duration, URL length and the parsed
-// query (see references/gampad-params.md), plus every gpt.js / pubads_impl load with its timing.
+// Input: verbatim output from list_network_requests and/or get_network_request saved in network-raw.txt.
+//        Both formats may be mixed in one file; "## Request" blocks win over "reqid=" rows for the same URL and
+//        rows whose URL the tool truncated ("... <truncated>") are skipped.
+// Output: one row per request to */gampad/ads with status, start time, duration, URL length, the parsed
+// query (see references/gampad-params.md) and the GAM fill headers (google-lineitem-id, google-creative-id,
+// google-mediationgroup-id) when a block carried them, plus every gpt.js / pubads_impl load with its timing.
 
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -72,6 +75,10 @@ export function parseAdRequestUrl(url) {
   const ppidVal = p.get('ppid');
   const ppid = ppidVal !== null && ppidVal !== '';
 
+  // prev_scp: slot-level key-values, one segment per slot separated by "|" (SRA) or a single segment.
+  const prevScpRaw = p.get('prev_scp');
+  const prev_scp = prevScpRaw ? prevScpRaw.split('|').map(decodeKeyValues) : [];
+
   return {
     host: u.host,
     path: u.pathname,
@@ -87,6 +94,10 @@ export function parseAdRequestUrl(url) {
     prev_iu_szs: p.get('prev_iu_szs'),
     cust_params: decodeKeyValues(p.get('cust_params')),
     scp: decodeKeyValues(p.get('scp')),
+    prev_scp,
+    dids: p.get('dids'),
+    impl: p.get('impl'),
+    frm: p.get('frm'),
     gdpr: p.get('gdpr'),
     gdpr_consent: gdprConsentLength,
     addtl_consent: p.get('addtl_consent'),
@@ -120,8 +131,10 @@ export function parseNetworkRaw(rawContent) {
   }
 
   const items = [];
+  const seen = new Set();
+  const FILL_HEADERS = ['google-lineitem-id', 'google-creative-id', 'google-mediationgroup-id', 'google-mediationtag-id', 'date', 'content-length', 'content-type'];
 
-  // Match "## Request <url>" blocks from get_network_request
+  // Match "## Request <url>" blocks from get_network_request (full URLs, headers)
   if (rawContent.includes('## Request')) {
     const blocks = rawContent.split(/^## Request\s+/m);
     for (const block of blocks) {
@@ -139,19 +152,37 @@ export function parseNetworkRaw(rawContent) {
       const startTime = startTimeMatch ? parseFloat(startTimeMatch[1]) : null;
       const duration = durationMatch ? parseFloat(durationMatch[1]) : null;
 
-      items.push({ url, status, startTime, duration });
+      const responseHeaders = {};
+      const respIdx = rest.indexOf('### Response Headers');
+      if (respIdx !== -1) {
+        const section = rest.slice(respIdx).split(/^###\s+(?!Response Headers)/m)[0];
+        for (const line of section.split('\n')) {
+          const m = line.match(/^-\s*([A-Za-z0-9-]+):(.*)$/);
+          if (m && FILL_HEADERS.includes(m[1].toLowerCase())) responseHeaders[m[1].toLowerCase()] = m[2].trim();
+        }
+      }
+
+      items.push({ url, status, startTime, duration, responseHeaders, source: 'block' });
+      seen.add(url);
     }
-    return items;
   }
 
-  // Match "reqid=<id> GET/POST <url> [<status>]" lines from list_network_requests
-  const lineRegex = /reqid=\d+\s+(?:GET|POST)\s+(\S+)(?:\s+\[(\d+)\])?/g;
+  // Match "reqid=<id> GET/POST <url> [<status>]" lines from list_network_requests (may be truncated)
+  const lineRegex = /reqid=(\d+)\s+(?:GET|POST|OPTIONS|HEAD)\s+(\S+)([^\n]*)/g;
   let match;
   while ((match = lineRegex.exec(rawContent)) !== null) {
+    const url = match[2];
+    const tail = match[3] || '';
+    if (tail.includes('<truncated>') || url.endsWith('...')) continue; // the tool cut the URL: unusable
+    if (seen.has(url)) continue; // a full block for the same URL exists
+    const statusMatch = tail.match(/\[(\d+)\]/);
     items.push({
-      url: match[1],
-      status: match[2] ? parseInt(match[2], 10) : 200
+      url,
+      status: statusMatch ? parseInt(statusMatch[1], 10) : 200,
+      reqid: parseInt(match[1], 10),
+      source: 'list'
     });
+    seen.add(url);
   }
 
   return items;
@@ -170,6 +201,16 @@ export function extractNetworkData(rawInput) {
     const startTime = item.timing?.startTime ?? item.startTime ?? item.time ?? null;
     const duration = item.timing?.duration ?? item.duration ?? null;
 
+    const rh = item.responseHeaders || {};
+    const idList = v => (v === undefined || v === null || v === '') ? [] : String(v).split(',').map(x => x.trim()).filter(x => x !== '');
+    const fill = Object.keys(rh).length ? {
+      lineItemIds: idList(rh['google-lineitem-id']),
+      creativeIds: idList(rh['google-creative-id']),
+      mediationGroupId: rh['google-mediationgroup-id'] ?? null,
+      date: rh['date'] ?? null,
+      contentLength: rh['content-length'] ? parseInt(rh['content-length'], 10) : null
+    } : null;
+
     if (url.includes('/gampad/ads')) {
       try {
         const parsed = parseAdRequestUrl(url);
@@ -178,7 +219,8 @@ export function extractNetworkData(rawInput) {
           status,
           startTime,
           duration,
-          ...parsed
+          ...parsed,
+          fill
         });
       } catch (e) {
         requests.push({

@@ -1,6 +1,7 @@
 // R09: Consent mismatch
 // Severity: High
-// Evidence: gdpr=1 with empty gdpr_consent; gdpr=1 but no __tcfapi; npa absent while purpose1 consent false
+// Evidence: gdpr=1 with empty gdpr_consent; gdpr=1 but no __tcfapi; npa absent while purpose1 consent false;
+//           gdpr=1 while a custom key-value (gdpr_applies / gdpr) in cust_params, scp, prev_scp or slot targeting says 0
 
 export default function r09ConsentMismatch(snapshot, network) {
   const findings = [];
@@ -44,6 +45,32 @@ export default function r09ConsentMismatch(snapshot, network) {
         fix: `configure CMP / GPT privacy settings to request non-personalized ads (npa=1) or limited ads (ltd=1) when Purpose 1 consent is denied`
       });
     }
+  }
+
+  // 4. gdpr=1 on the request while a custom key-value says GDPR does not apply
+  const GDPR_KEYS = ['gdpr_applies', 'gdprapplies', 'gdpr'];
+  const saysNo = v => {
+    const vals = Array.isArray(v) ? v : [v];
+    return vals.some(x => ['0', 'false', 'no'].includes(String(x).trim().toLowerCase()));
+  };
+  const keyIn = obj => Object.keys(obj || {}).find(k => GDPR_KEYS.includes(k.toLowerCase()) && saysNo(obj[k]));
+  const contradictions = [];
+  for (const r of requests.filter(r => r.gdpr === '1')) {
+    const k = keyIn(r.cust_params) || keyIn(r.scp) || (r.prev_scp || []).map(keyIn).find(Boolean);
+    if (k) contradictions.push(`request ${r.correlator || '?'} (${k})`);
+  }
+  for (const s of (snapshot?.slots || [])) {
+    const k = keyIn(s.targeting);
+    if (k && requests.some(r => r.gdpr === '1')) contradictions.push(`slot ${s.elementId} (${k})`);
+  }
+  if (contradictions.length > 0) {
+    findings.push({
+      id: 'R09',
+      severity: 'medium',
+      slot: null,
+      evidence: `ad requests carry gdpr=1 while a custom targeting key says GDPR does not apply: ${contradictions.slice(0, 6).join(', ')}${contradictions.length > 6 ? ` and ${contradictions.length - 6} more` : ''}`,
+      fix: `derive the custom key from the same TCF signal as the gdpr parameter (e.g. __tcfapi getTCData gdprApplies) or drop it; line items and reports keyed on it currently see the wrong value`
+    });
   }
 
   return findings;

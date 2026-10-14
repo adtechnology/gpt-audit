@@ -1,6 +1,6 @@
 # gpt-audit
 
-Audit the Google Publisher Tag (GPT / Google Ad Manager) setup of a web page in a live Chrome browser: every slot, every ad request, the consent signals, a fixed set of anomaly rules, and a clean markdown report.
+Audit the Google Publisher Tag (GPT / Google Ad Manager) setup of a web page in a live Chrome browser: every slot (in the main frame and in same-origin iframes that run their own GPT, such as ad-server passbacks), every ad request, the consent signals, a fixed set of anomaly rules, and a clean markdown report.
 
 Packaged as a single cross-platform plugin that installs in **Google Antigravity**, **Claude Code**, and **OpenAI Codex**. The browser layer is Google's [Chrome DevTools for agents](https://github.com/ChromeDevTools/chrome-devtools-mcp) (`chrome-devtools-mcp`).
 
@@ -11,7 +11,7 @@ Packaged as a single cross-platform plugin that installs in **Google Antigravity
 - 🌐 **[Interactive HTML Docs](docs/index.html)** — View the interactive web documentation portal (`npm run docs`).
 - 📖 **[Installation Guide](docs/INSTALL.md)** — Step-by-step installation for Google Antigravity, Claude Code, and OpenAI Codex.
 - 🚀 **[Usage Guide](docs/USAGE.md)** — Natural language prompt examples, subagent commands, output artifacts, and CLI instructions.
-- 📋 **[Anomaly Catalog](skills/gpt-audit/references/anomaly-catalog.md)** — Description, severity, evidence, and remediation for rules R01–R15.
+- 📋 **[Anomaly Catalog](skills/gpt-audit/references/anomaly-catalog.md)** — Description, severity, evidence, and remediation for rules R01–R18.
 - 🔍 **[GAM Query Parameters](skills/gpt-audit/references/gampad-params.md)** — Breakdown of parsed `/gampad/ads` parameters.
 - 🎯 **[Demo Targets](docs/TARGETS.md)** — Reference URLs and sample test properties.
 - 🛠 **[Build Plan](docs/PLAN.md)** — Technical architecture and hackathon phase roadmap.
@@ -25,7 +25,7 @@ Agent (reads skills/gpt-audit/SKILL.md, orchestrates only)
   └─► Chrome DevTools MCP (chrome-devtools-mcp, isolated local Node process via npx)
         └─► Chrome, isolated profile (the audited page; collect-gpt.js runs in-page)
               ├─► out/<host>/snapshot.json + network.json (+ page.png, console.png)
-              └─► analyze.js (rules R01-R10, deterministic) ──► findings.json
+              └─► analyze.js (rules R01-R10, R16-R18, deterministic) ──► findings.json
                     └─► report.js ──► report.md + report.json (+ comparison.md for multiple URLs)
 ```
 
@@ -115,9 +115,9 @@ For each audited URL, files are saved in `out/<host>/` (git-ignored):
 
 | File | Purpose |
 | --- | --- |
-| `snapshot.json` | In-page DOM and pubads state (version, slots, targeting, events) |
-| `network-raw.txt` | Verbatim MCP tool output from Chrome DevTools |
-| `network.json` | Parsed `/gampad/ads` ad calls (SRA, params, consent, display/video kind) |
+| `snapshot.json` | In-page DOM and pubads state (version, slots, targeting, events); `frames[]` and `slot.frame` for GPT instances in same-origin iframes |
+| `network-raw.txt` | Verbatim MCP tool output from Chrome DevTools (list rows and request blocks, mixed) |
+| `network.json` | Parsed `/gampad/ads` ad calls (SRA, params, `prev_scp`, consent, display/video kind, GAM fill headers) |
 | `findings.json` | Rule engine output (id, severity, slot, evidence, fix) |
 | `report.md` | Complete human-readable markdown audit report |
 | `report.json` | Machine-readable summary for CI/CD ingestion |
@@ -138,10 +138,29 @@ For each audited URL, files are saved in `out/<host>/` (git-ignored):
 
 ---
 
+## What changed in 0.2.0
+
+Lessons from auditing an ad-tech-heavy homepage (bild.de), where GPT in the main frame defined no slot and
+GAM was reached only through ad-server passback creatives:
+
+- **Collector reads GPT instances in same-origin iframes** (passbacks, wrappers): their slots join `slots[]`
+  with a `frame` field, the instances are listed in `frames[]`, and `gpt.gptInstances` / `gpt.mainFrameSlotCount`
+  summarise the split. The Publisher Console only sees the main frame; the report now sees both.
+- **New rules** R17 (GPT loaded in the main frame but idle) and R18 (several slots share one ad unit path
+  without a position key). R07 tells repeated `display()` calls apart from separate GPT instances (one `pvsid`
+  per correlator), R09 flags a custom `GDPR_APPLIES=0` next to `gdpr=1`, R10 counts legacy-host loads per
+  iframe and falls back to the network log, R05 no longer demands reserved height inside iframes.
+- **network-extract** accepts list rows and request blocks in one file, drops rows the tool truncated, parses
+  `prev_scp` per slot and keeps the GAM fill headers (`google-lineitem-id`, `google-creative-id`,
+  `google-mediationgroup-id`) as `fill`.
+- **SKILL.md** waits for idle with a `PerformanceObserver` (the resource buffer stops at 250 entries), finds
+  CMP buttons inside cross-origin iframes with a verbose snapshot, and fetches the `gpt.js` / `pubads_impl`
+  request details right after consent, before the DevTools request buffer evicts them.
+
 ## Development & Testing
 
 ```bash
-# Run unit test suite (10/10 tests)
+# Run unit test suite (24 tests)
 npm test
 
 # Syntax-check all Node scripts

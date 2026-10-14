@@ -750,7 +750,7 @@ export function renderHtmlReport(snapshot, network, findings = [], jsonReport = 
       <div class="kpi-card">
         <div class="kpi-label">Slots Defined</div>
         <div class="kpi-value">${slots.length}</div>
-        <div class="kpi-sub">${slots.filter(s => s.inViewportOnLoad).length} in viewport on load</div>
+        <div class="kpi-sub">${slots.filter(s => s.inViewportOnLoad).length} in viewport on load${(jsonReport?.frames?.length) ? ` &bull; ${slots.filter(s => s.frame).length} in ${jsonReport.frames.length} iframe GPT instance(s)` : ''}</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-label">Ad Requests (GAM)</div>
@@ -812,6 +812,7 @@ export function renderHtmlReport(snapshot, network, findings = [], jsonReport = 
             <thead>
               <tr>
                 <th>Element ID</th>
+                <th>Frame</th>
                 <th>Ad Unit Path</th>
                 <th>Requested Sizes</th>
                 <th>Rendered Size</th>
@@ -836,6 +837,7 @@ export function renderHtmlReport(snapshot, network, findings = [], jsonReport = 
                 return `
                 <tr>
                   <td><code>${escapeHtml(s.elementId)}</code></td>
+                  <td>${s.frame ? `<code title="${escapeHtml(s.frame)}">${escapeHtml(s.frame.length > 24 ? s.frame.slice(0, 21) + '…' : s.frame)}</code>` : '<span style="color:var(--text-dim)">main</span>'}</td>
                   <td><code>${escapeHtml(s.adUnitPath)}</code></td>
                   <td>${escapeHtml(sizesReq)}</td>
                   <td><b>${escapeHtml(sizeRend)}</b></td>

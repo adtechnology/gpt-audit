@@ -816,7 +816,7 @@
       <div class="nav-title">Audit Engine</div>
       <ul class="nav-links">
         <li class="nav-item"><a href="#config">Publisher Config & PPID</a></li>
-        <li class="nav-item"><a href="#rules">Rules Catalog (R01–R16)</a></li>
+        <li class="nav-item"><a href="#rules">Rules Catalog (R01–R18)</a></li>
         <li class="nav-item"><a href="#sample-report">Live Audit Preview</a></li>
         <li class="nav-item"><a href="#guardrails">Safety Guardrails</a></li>
         <li class="nav-item"><a href="#cli">Standalone CLI / CI</a></li>
@@ -1101,7 +1101,7 @@ codex</code></pre>
     <section id="rules">
       <div class="section-header">
         <span class="section-tag">Deterministic Engine</span>
-        <h2 class="section-title">Anomaly Rules Catalog (R01–R16)</h2>
+        <h2 class="section-title">Anomaly Rules Catalog (R01–R18)</h2>
         <p class="section-desc">Rules are implemented as plain Node 22 ESM modules in <code>scripts/rules/</code>. No external LLM is involved in judging; the same page generates identical findings in every agent.</p>
       </div>
 
@@ -1235,6 +1235,28 @@ codex</code></pre>
           <div class="rule-name">Publisher Mandatory Parameter Missing</div>
           <div class="rule-evidence">Snapshot or ad requests lack parameters specified in <code>gpt-audit.config.json</code> (e.g. PPID, cust_params, pageTargeting).</div>
           <div class="rule-fix">Ensure required parameters are set via <code>pubads().setPublisherProvidedId()</code> or targeting APIs.</div>
+        </div>
+
+        <!-- R17 -->
+        <div class="rule-card" data-severity="low">
+          <div class="rule-top">
+            <span class="rule-id">R17</span>
+            <span class="badge-sev low">Low</span>
+          </div>
+          <div class="rule-name">GPT Loaded in the Main Frame but Never Used There</div>
+          <div class="rule-evidence"><code>gpt.present</code> with <code>gpt.mainFrameSlotCount === 0</code>; GAM is reached only from GPT instances in same-origin iframes (<code>frames[]</code>, ad-server passbacks) or from a video player.</div>
+          <div class="rule-fix">Move the GAM slots into the main-frame instance (passbacks via <code>refresh()</code>) or remove the unused tag.</div>
+        </div>
+
+        <!-- R18 -->
+        <div class="rule-card" data-severity="low">
+          <div class="rule-top">
+            <span class="rule-id">R18</span>
+            <span class="badge-sev low">Low</span>
+          </div>
+          <div class="rule-name">Several Slots Share One Ad Unit Path</div>
+          <div class="rule-evidence">Two or more slots with different <code>elementId</code> use the same <code>adUnitPath</code> and no position key (<code>pos</code>, <code>miSlot</code>, …) tells them apart.</div>
+          <div class="rule-fix">Give each position its own (child) ad unit or set a position key-value on every slot.</div>
         </div>
 
         <!-- R11-R15 (Planned) -->
