@@ -16,3 +16,11 @@ test('parseAdRequestUrl returns host and raw params', () => {
   assert.equal(r.host, 'securepubads.g.doubleclick.net');
   assert.equal(r.raw.correlator, '123');
 });
+
+test('init-listeners stays small and self-contained', () => {
+  const src = readFileSync(new URL('../init-listeners.js', import.meta.url), 'utf8');
+  assert.ok(src.length < 2_000, 'init-listeners.js must stay tiny');
+  assert.ok(!/^\s*import\s/m.test(src), 'init-listeners.js must not use imports');
+  assert.ok(src.includes('googletag.cmd'), 'init-listeners.js must hook googletag.cmd');
+});
+

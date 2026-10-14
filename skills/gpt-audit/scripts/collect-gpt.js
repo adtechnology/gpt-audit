@@ -1,27 +1,198 @@
-// collect-gpt.js — Phase 1 (see docs/PLAN.md, "Phase 1 — collector").
-//
-// Runs INSIDE the audited page via the chrome-devtools MCP tool `evaluate_script`.
-// Contract: one self-contained async function, no imports, no dependencies, under 10 KB,
-// every field in its own try/catch (failures land in `errors[]`), never throws,
-// resolves within 1500 ms. Leaves nothing behind except `window.__gptAudit`.
-//
-// Returns the snapshot object with the groups: meta, gpt, slots[], neighbours{prebid, consent, apstag}, errors[].
-// opts.probe === true attaches GPT event listeners (slotRequested, slotResponseReceived,
-// slotRenderEnded, impressionViewable, slotOnload) into window.__gptAudit.events; a second call
-// with { probe: false } returns them.
-//
-// TODO (Phase 1): implement. Keep the signature below; the SKILL.md procedure and the tests depend on it.
-
+// collect-gpt.js — runs in-page via evaluate_script. Returns snapshot object.
 async function collectGpt(opts = {}) {
-  const errors = [{ field: 'collector', message: 'not implemented yet (Phase 1)' }];
+  const errors = [];
+  const safe = (fn, f, d = null) => {
+    try { const r = fn(); return r !== undefined ? r : d; }
+    catch (e) { errors.push({ field: f, message: e.message }); return d; }
+  };
+  const trunc = (v, m = 200) => typeof v === 'string' ? (v.length > m ? v.slice(0, m) : v) : Array.isArray(v) ? v.slice(0, 20).map(x => trunc(x, m)) : v;
+
+  safe(() => {
+    window.__gptAudit = window.__gptAudit || { events: [] };
+    if (opts.probe && !window.__gptAudit.listenersAttached && window.googletag?.cmd) {
+      window.googletag.cmd.push(() => {
+        try {
+          const pa = window.googletag.pubads();
+          ['slotRequested', 'slotResponseReceived', 'slotRenderEnded', 'impressionViewable', 'slotOnload'].forEach(n =>
+            pa.addEventListener(n, e => {
+              try {
+                window.__gptAudit.events.push({
+                  name: n, timestamp: Date.now(),
+                  slotElementId: e.slot?.getSlotElementId?.() || null,
+                  isEmpty: typeof e.isEmpty === 'boolean' ? e.isEmpty : null,
+                  size: e.size || null, lineItemId: e.lineItemId ?? null,
+                  creativeId: e.creativeId ?? null, serviceName: e.serviceName || null
+                });
+              } catch (_) {}
+            })
+          );
+          window.__gptAudit.listenersAttached = true;
+        } catch (_) {}
+      });
+    }
+  }, 'probe');
+
+  const vp = { w: window.innerWidth || 0, h: window.innerHeight || 0, dpr: window.devicePixelRatio || 1 };
+  const meta = {
+    url: trunc(location.href, 500), title: trunc(document.title, 200), viewport: vp,
+    userAgent: trunc(navigator.userAgent, 300), timestamp: new Date().toISOString(), collectorVersion: '0.1.0'
+  };
+
+  const scripts = Array.from(document.querySelectorAll('script[src*="/tag/js/gpt.js"], script[src*="googletagservices.com"]'));
+  const scriptTags = scripts.map(s => ({ src: trunc(s.src, 300), async: !!s.async, defer: !!s.defer, inHead: s.parentNode === document.head }));
+  const legacyHost = scripts.some(s => (s.src || '').includes('googletagservices.com'));
+
+  const gt = window.googletag;
+  const hasGpt = typeof gt !== 'undefined';
+  const gptInfo = {
+    present: hasGpt, version: null, apiReady: false, pubadsReady: false,
+    scriptTags, legacyHost, cmdQueueLength: 0, config: {}, initialLoadDisabled: false, pageTargeting: {}
+  };
+
+  if (!hasGpt) {
+    const adElements = Array.from(document.querySelectorAll('div[id*="ad"], div[id*="gpt"], div[data-google-query-id], div[class*="ad-slot"]'))
+      .slice(0, 60).map(el => ({ elementId: el.id || null, className: el.className || null, hasQueryId: el.hasAttribute('data-google-query-id') }));
+    return {
+      meta, gpt: gptInfo, slots: [], adElements,
+      neighbours: { prebid: { present: typeof window.pbjs !== 'undefined' }, consent: {}, apstag: { present: typeof window.apstag !== 'undefined' } },
+      events: window.__gptAudit?.events || [], errors
+    };
+  }
+
+  gptInfo.version = safe(() => gt.getVersion?.(), 'gpt.version');
+  gptInfo.apiReady = safe(() => !!gt.apiReady, 'gpt.apiReady', false);
+  gptInfo.pubadsReady = safe(() => !!gt.pubadsReady, 'gpt.pubadsReady', false);
+  gptInfo.cmdQueueLength = safe(() => (Array.isArray(gt.cmd) ? gt.cmd.length : 0), 'gpt.cmdQueueLength', 0);
+
+  const pubads = safe(() => gt.pubads?.(), 'gpt.pubads');
+  if (pubads) {
+    gptInfo.initialLoadDisabled = safe(() => pubads.isInitialLoadDisabled?.(), 'gpt.initialLoadDisabled', false);
+    gptInfo.config = safe(() => pubads.getConfig?.() || gt.getConfig?.() || {}, 'gpt.config', {});
+    safe(() => {
+      for (const k of (pubads.getTargetingKeys?.() || []).slice(0, 20)) {
+        gptInfo.pageTargeting[k] = trunc(pubads.getTargeting(k), 200);
+      }
+    }, 'gpt.pageTargeting');
+  }
+
+  const normSizes = (s) => !s || s === 'fluid' ? s || [] : !Array.isArray(s) ? [] : s.map(x => x === 'fluid' ? 'fluid' : Array.isArray(x) ? (typeof x[0] === 'number' ? [x[0], x[1]] : normSizes(x)) : (x?.getWidth && x?.getHeight ? [x.getWidth(), x.getHeight()] : x)).filter(Boolean);
+
+  const rawSlots = safe(() => pubads?.getSlots?.() || [], 'slots', []);
+  const slots = [];
+  let hbKeysCount = 0;
+
+  for (const s of rawSlots.slice(0, 60)) {
+    const elementId = safe(() => s.getSlotElementId?.(), 'slot.elementId');
+    const adUnitPath = safe(() => s.getAdUnitPath?.(), `slot[${elementId}].adUnitPath`);
+    const sizes = safe(() => normSizes(s.getSizes?.()), `slot[${elementId}].sizes`, []);
+    const targeting = {};
+    safe(() => {
+      for (const k of (s.getTargetingKeys?.() || []).slice(0, 20)) {
+        if (k.startsWith('hb_')) hbKeysCount++;
+        targeting[k] = trunc(s.getTargeting(k), 200);
+      }
+    }, `slot[${elementId}].targeting`);
+    const categoryExclusions = safe(() => s.getCategoryExclusions?.() || [], `slot[${elementId}].categoryExclusions`, []);
+    const response = safe(() => {
+      const r = s.getResponseInformation?.();
+      return r ? { advertiserId: r.advertiserId ?? null, campaignId: r.campaignId ?? null, lineItemId: r.lineItemId ?? null, creativeId: r.creativeId ?? null, creativeTemplateId: r.creativeTemplateId ?? null } : null;
+    }, `slot[${elementId}].response`);
+
+    const el = elementId ? document.getElementById(elementId) : null;
+    const dom = { exists: !!el, boundingRect: null, inViewportOnLoad: false, cssDisplay: null, reservedHeight: false, queryId: null };
+    const iframeInfo = { present: false, w: 0, h: 0, safeFrame: false, name: '' };
+    if (el) {
+      safe(() => {
+        const { x, y, width, height, top, right, bottom, left } = el.getBoundingClientRect();
+        dom.boundingRect = { x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height), top: Math.round(top), right: Math.round(right), bottom: Math.round(bottom), left: Math.round(left) };
+        dom.inViewportOnLoad = top < vp.h && bottom > 0 && left < vp.w && right > 0;
+        const cs = window.getComputedStyle(el);
+        dom.cssDisplay = cs.display;
+        dom.reservedHeight = (parseFloat(cs.minHeight) || 0) > 0 || (parseFloat(el.style.height) || 0) > 0;
+        dom.queryId = el.getAttribute('data-google-query-id') || null;
+        const ifr = el.querySelector('iframe');
+        if (ifr) {
+          iframeInfo.present = true;
+          iframeInfo.w = ifr.offsetWidth || parseInt(ifr.width, 10) || 0;
+          iframeInfo.h = ifr.offsetHeight || parseInt(ifr.height, 10) || 0;
+          iframeInfo.safeFrame = `${ifr.src || ''} ${ifr.id || ''} ${ifr.name || ''}`.toLowerCase().includes('safeframe');
+          iframeInfo.name = trunc(ifr.name || ifr.id || '', 100);
+        }
+      }, `slot[${elementId}].dom`);
+    }
+    slots.push({ elementId, adUnitPath, sizes, targeting, categoryExclusions, response, dom, iframe: iframeInfo });
+  }
+
+  const pb = window.pbjs;
+  const prebid = { present: typeof pb !== 'undefined', version: null, bidderTimeout: null, adUnits: [], bids: [], hbKeysOnSlots: hbKeysCount > 0 };
+  if (prebid.present) {
+    safe(() => {
+      prebid.version = pb.version || null;
+      prebid.bidderTimeout = typeof pb.getConfig === 'function' ? pb.getConfig('bidderTimeout') : null;
+      prebid.adUnits = (pb.adUnits || []).slice(0, 60).map(u => ({
+        code: trunc(u.code, 100), sizes: u.mediaTypes?.banner?.sizes || u.sizes || [],
+        bidders: (u.bids || []).slice(0, 20).map(b => trunc(b.bidder, 50))
+      }));
+      const resp = pb.getBidResponses?.() || {};
+      for (const [code, entry] of Object.entries(resp)) {
+        for (const b of (entry?.bids || []).slice(0, 10)) {
+          prebid.bids.push({
+            adUnitCode: trunc(code, 100), bidder: trunc(b.bidder, 50),
+            cpm: typeof b.cpm === 'number' ? b.cpm : null, status: trunc(b.statusMessage || b.status || '', 50),
+            timeToRespond: typeof b.timeToRespond === 'number' ? b.timeToRespond : null
+          });
+        }
+      }
+    }, 'neighbours.prebid');
+  }
+
+  const consent = {
+    tcf: { present: typeof window.__tcfapi === 'function', gdprApplies: null, tcStringLength: 0, purpose1: null, cmpId: null },
+    gpp: { present: typeof window.__gpp === 'function', sections: null },
+    usp: { present: typeof window.__uspapi === 'function' }
+  };
+
+  if (consent.tcf.present) {
+    try {
+      await new Promise(res => {
+        const t = setTimeout(res, 600);
+        try {
+          window.__tcfapi('getTCData', 2, (tc, ok) => {
+            clearTimeout(t);
+            if (ok && tc) {
+              consent.tcf.gdprApplies = typeof tc.gdprApplies === 'boolean' ? tc.gdprApplies : null;
+              consent.tcf.tcStringLength = (tc.tcString || '').length;
+              consent.tcf.cmpId = tc.cmpId ?? null;
+              consent.tcf.purpose1 = tc.purpose?.consents ? !!tc.purpose.consents[1] : null;
+            }
+            res();
+          });
+        } catch (_) { clearTimeout(t); res(); }
+      });
+    } catch (e) { errors.push({ field: 'neighbours.consent.tcf', message: e.message }); }
+  }
+
+  if (consent.gpp.present) {
+    try {
+      await new Promise(res => {
+        const t = setTimeout(res, 300);
+        try {
+          window.__gpp('ping', (p, ok) => {
+            clearTimeout(t);
+            if (ok && p) consent.gpp.sections = p.applicableSections || null;
+            res();
+          });
+        } catch (_) { clearTimeout(t); res(); }
+      });
+    } catch (e) { errors.push({ field: 'neighbours.consent.gpp', message: e.message }); }
+  }
+
   return {
-    meta: { url: location.href, title: document.title, collectorVersion: '0.0.0' },
-    gpt: { present: typeof window.googletag !== 'undefined' },
-    slots: [],
-    neighbours: {},
-    errors,
+    meta, gpt: gptInfo, slots,
+    neighbours: { prebid, consent, apstag: { present: typeof window.apstag !== 'undefined' } },
+    events: (window.__gptAudit && Array.isArray(window.__gptAudit.events)) ? window.__gptAudit.events.slice(0, 200) : [],
+    errors
   };
 }
 
-// Allow `node --check` and unit tests to load this file; the browser only needs the function above.
 if (typeof module !== 'undefined' && module.exports) module.exports = { collectGpt };
