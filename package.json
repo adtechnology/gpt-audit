@@ -12,6 +12,7 @@
     "extract": "node skills/gpt-audit/scripts/network-extract.js",
     "analyze": "node skills/gpt-audit/scripts/analyze.js",
     "report": "node skills/gpt-audit/scripts/report.js",
+    "docs": "open docs/index.html",
     "fixture": "bash fixtures/serve.sh",
     "test": "node --test \"skills/gpt-audit/scripts/tests/**/*.test.js\""
   }

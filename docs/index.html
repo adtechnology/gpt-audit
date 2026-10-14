@@ -1,0 +1,1417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>gpt-audit — Universal GPT & Google Ad Manager Audit Plugin</title>
+  <meta name="description" content="Audit the Google Publisher Tag (GPT / Google Ad Manager) setup of any web page in a live Chrome browser. Installs as a plugin in Google Antigravity, Claude Code, and OpenAI Codex.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --bg-card: rgba(17, 24, 39, 0.7);
+      --bg-card-hover: rgba(24, 33, 54, 0.85);
+      --bg-surface: #111827;
+      --bg-elevated: #1e293b;
+      --border: rgba(255, 255, 255, 0.08);
+      --border-accent: rgba(56, 189, 248, 0.3);
+      --text: #f1f5f9;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      --primary: #38bdf8;
+      --primary-glow: rgba(56, 189, 248, 0.25);
+      --accent-purple: #818cf8;
+      --accent-emerald: #34d399;
+      --accent-amber: #fbbf24;
+      --accent-rose: #f43f5e;
+      --font-heading: 'Outfit', sans-serif;
+      --font-body: 'Plus Jakarta Sans', sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 16px;
+      --radius-full: 9999px;
+      --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: var(--font-body);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+      background-image:
+        radial-gradient(circle at 15% 10%, rgba(56, 189, 248, 0.08) 0%, transparent 40%),
+        radial-gradient(circle at 85% 30%, rgba(129, 140, 248, 0.08) 0%, transparent 40%),
+        radial-gradient(circle at 50% 80%, rgba(52, 211, 153, 0.05) 0%, transparent 50%);
+      background-attachment: fixed;
+    }
+
+    /* Container & Layout */
+    .app-container {
+      display: flex;
+      min-height: 100vh;
+    }
+
+    /* Sidebar Navigation */
+    .sidebar {
+      width: 260px;
+      flex-shrink: 0;
+      background: rgba(11, 15, 25, 0.95);
+      backdrop-filter: blur(16px);
+      border-right: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+      padding: 24px 16px;
+      display: flex;
+      flex-direction: column;
+      z-index: 40;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 28px;
+      text-decoration: none;
+    }
+
+    .brand-icon {
+      width: 38px;
+      height: 38px;
+      border-radius: var(--radius-md);
+      background: linear-gradient(135deg, var(--primary), var(--accent-purple));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-family: var(--font-heading);
+      font-size: 18px;
+      color: #0b0f19;
+      box-shadow: 0 0 20px var(--primary-glow);
+      flex-shrink: 0;
+    }
+
+    .brand-text h2 {
+      font-family: var(--font-heading);
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      color: #fff;
+    }
+
+    .brand-badge {
+      font-size: 10px;
+      font-weight: 600;
+      background: rgba(56, 189, 248, 0.15);
+      color: var(--primary);
+      padding: 2px 7px;
+      border-radius: var(--radius-full);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+    }
+
+    .nav-group {
+      margin-bottom: 20px;
+    }
+
+    .nav-title {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--text-dim);
+      font-weight: 700;
+      margin-bottom: 8px;
+      padding-left: 10px;
+    }
+
+    .nav-links {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .nav-item a {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 500;
+      border-radius: var(--radius-sm);
+      transition: var(--transition);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .nav-item a:hover, .nav-item a.active {
+      color: #fff;
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .nav-item a.active {
+      color: var(--primary);
+      background: rgba(56, 189, 248, 0.1);
+      font-weight: 600;
+    }
+
+    .sidebar-footer {
+      margin-top: auto;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+      font-size: 11px;
+      color: var(--text-dim);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    /* Main Content */
+    .main-content {
+      flex: 1;
+      min-width: 0;
+      padding: 40px 48px 80px;
+      max-width: 1200px;
+    }
+
+    /* Hero Section */
+    .hero {
+      padding: 40px 0 60px;
+      border-bottom: 1px solid var(--border);
+      position: relative;
+    }
+
+    .hero-badge-wrap {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(56, 189, 248, 0.1);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      padding: 6px 14px;
+      border-radius: var(--radius-full);
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--primary);
+      margin-bottom: 24px;
+    }
+
+    .hero-badge-wrap .pulse {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent-emerald);
+      box-shadow: 0 0 10px var(--accent-emerald);
+      animation: pulseAnim 2s infinite;
+    }
+
+    @keyframes pulseAnim {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(1.2); }
+    }
+
+    h1.hero-title {
+      font-family: var(--font-heading);
+      font-size: 48px;
+      font-weight: 800;
+      line-height: 1.15;
+      letter-spacing: -1.5px;
+      margin-bottom: 20px;
+      background: linear-gradient(135deg, #ffffff 40%, var(--primary) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .hero-subtitle {
+      font-size: 18px;
+      color: var(--text-muted);
+      max-width: 760px;
+      line-height: 1.6;
+      margin-bottom: 32px;
+    }
+
+    .hero-actions {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 24px;
+      border-radius: var(--radius-md);
+      font-weight: 600;
+      font-size: 14px;
+      text-decoration: none;
+      cursor: pointer;
+      transition: var(--transition);
+      border: none;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--primary), #0284c7);
+      color: #0b0f19;
+      box-shadow: 0 4px 20px var(--primary-glow);
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 24px rgba(56, 189, 248, 0.4);
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.05);
+      color: #fff;
+      border: 1px solid var(--border);
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    /* Section Styling */
+    section {
+      padding: 60px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .section-header {
+      margin-bottom: 32px;
+    }
+
+    .section-tag {
+      font-size: 12px;
+      text-transform: uppercase;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      color: var(--primary);
+      margin-bottom: 8px;
+      display: block;
+    }
+
+    .section-title {
+      font-family: var(--font-heading);
+      font-size: 32px;
+      font-weight: 700;
+      letter-spacing: -0.8px;
+      color: #fff;
+      margin-bottom: 12px;
+    }
+
+    .section-desc {
+      color: var(--text-muted);
+      font-size: 16px;
+      max-width: 720px;
+    }
+
+    /* Architecture Flow Cards */
+    .flow-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin-top: 24px;
+    }
+
+    .flow-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 24px;
+      position: relative;
+      transition: var(--transition);
+      backdrop-filter: blur(8px);
+    }
+
+    .flow-card:hover {
+      border-color: var(--border-accent);
+      transform: translateY(-3px);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    }
+
+    .flow-step-num {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--primary);
+      background: rgba(56, 189, 248, 0.1);
+      padding: 4px 10px;
+      border-radius: var(--radius-full);
+      display: inline-block;
+      margin-bottom: 16px;
+    }
+
+    .flow-card h3 {
+      font-family: var(--font-heading);
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      color: #fff;
+    }
+
+    .flow-card p {
+      font-size: 13px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    /* Platform Tabs */
+    .tabs-wrapper {
+      margin-top: 28px;
+    }
+
+    .tab-nav {
+      display: flex;
+      gap: 8px;
+      background: rgba(17, 24, 39, 0.6);
+      padding: 6px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border);
+      width: fit-content;
+      margin-bottom: 24px;
+    }
+
+    .tab-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      padding: 10px 20px;
+      border-radius: var(--radius-sm);
+      font-family: var(--font-body);
+      font-weight: 600;
+      font-size: 14px;
+      cursor: pointer;
+      transition: var(--transition);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .tab-btn:hover {
+      color: #fff;
+    }
+
+    .tab-btn.active {
+      background: var(--bg-elevated);
+      color: #fff;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+    }
+
+    .tab-pane {
+      display: none;
+      animation: fadeIn 0.3s ease;
+    }
+
+    .tab-pane.active {
+      display: block;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Card & Codebox */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 32px;
+      backdrop-filter: blur(12px);
+    }
+
+    .code-box {
+      background: #060911;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      margin: 16px 0;
+      position: relative;
+    }
+
+    .code-header {
+      background: rgba(255, 255, 255, 0.03);
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+
+    .copy-btn {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      padding: 4px 10px;
+      border-radius: var(--radius-sm);
+      font-size: 11px;
+      font-family: var(--font-mono);
+      cursor: pointer;
+      transition: var(--transition);
+    }
+
+    .copy-btn:hover {
+      background: rgba(255, 255, 255, 0.15);
+      color: #fff;
+    }
+
+    pre code {
+      display: block;
+      padding: 16px;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      color: #e2e8f0;
+      overflow-x: auto;
+      line-height: 1.5;
+    }
+
+    /* Prompt Cards */
+    .prompt-card {
+      background: rgba(17, 24, 39, 0.5);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 20px;
+      margin-bottom: 16px;
+      position: relative;
+    }
+
+    .prompt-card .prompt-text {
+      font-family: var(--font-mono);
+      font-size: 14px;
+      color: var(--primary);
+      margin-bottom: 8px;
+    }
+
+    .prompt-card .prompt-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    /* Rule Catalog Grid */
+    .catalog-controls {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+
+    .filter-btn-group {
+      display: flex;
+      gap: 6px;
+      background: rgba(17, 24, 39, 0.6);
+      padding: 4px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border);
+    }
+
+    .filter-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      padding: 6px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: var(--transition);
+    }
+
+    .filter-btn.active {
+      background: var(--bg-elevated);
+      color: #fff;
+    }
+
+    .search-input {
+      flex: 1;
+      min-width: 260px;
+      background: rgba(17, 24, 39, 0.6);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 8px 16px;
+      color: #fff;
+      font-family: var(--font-body);
+      font-size: 14px;
+      outline: none;
+      transition: var(--transition);
+    }
+
+    .search-input:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 12px var(--primary-glow);
+    }
+
+    .rules-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+      gap: 16px;
+    }
+
+    .rule-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 20px;
+      transition: var(--transition);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .rule-card:hover {
+      border-color: rgba(255, 255, 255, 0.2);
+      transform: translateY(-2px);
+    }
+
+    .rule-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+
+    .rule-id {
+      font-family: var(--font-mono);
+      font-weight: 700;
+      font-size: 14px;
+      color: #fff;
+    }
+
+    .badge-sev {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: var(--radius-full);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .badge-sev.high {
+      background: rgba(244, 63, 94, 0.15);
+      color: var(--accent-rose);
+      border: 1px solid rgba(244, 63, 94, 0.3);
+    }
+
+    .badge-sev.medium {
+      background: rgba(251, 191, 36, 0.15);
+      color: var(--accent-amber);
+      border: 1px solid rgba(251, 191, 36, 0.3);
+    }
+
+    .badge-sev.low {
+      background: rgba(56, 189, 248, 0.15);
+      color: var(--primary);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+    }
+
+    .rule-name {
+      font-family: var(--font-heading);
+      font-size: 16px;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 8px;
+    }
+
+    .rule-evidence {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+      flex: 1;
+    }
+
+    .rule-fix {
+      font-size: 12px;
+      background: rgba(0, 0, 0, 0.3);
+      padding: 8px 12px;
+      border-radius: var(--radius-sm);
+      border-left: 2px solid var(--accent-emerald);
+      color: #a7f3d0;
+    }
+
+    /* Live Report Metrics Banner */
+    .metrics-banner {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .metric-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 18px;
+      text-align: center;
+    }
+
+    .metric-num {
+      font-family: var(--font-heading);
+      font-size: 28px;
+      font-weight: 800;
+      color: #fff;
+      margin-bottom: 4px;
+    }
+
+    .metric-lbl {
+      font-size: 12px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      font-weight: 600;
+    }
+
+    /* Table Styling */
+    .table-container {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      background: rgba(11, 15, 25, 0.6);
+      margin-top: 16px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      text-align: left;
+    }
+
+    th {
+      background: rgba(255, 255, 255, 0.03);
+      color: var(--text-muted);
+      font-weight: 600;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+
+    td {
+      padding: 12px 16px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      color: var(--text);
+    }
+
+    tr:hover td {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .tag-adx {
+      background: rgba(129, 140, 248, 0.15);
+      color: var(--accent-purple);
+      border: 1px solid rgba(129, 140, 248, 0.3);
+      padding: 2px 6px;
+      border-radius: var(--radius-sm);
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .tag-unfilled {
+      background: rgba(244, 63, 94, 0.15);
+      color: var(--accent-rose);
+      border: 1px solid rgba(244, 63, 94, 0.3);
+      padding: 2px 6px;
+      border-radius: var(--radius-sm);
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .tag-direct {
+      background: rgba(52, 211, 153, 0.15);
+      color: var(--accent-emerald);
+      border: 1px solid rgba(52, 211, 153, 0.3);
+      padding: 2px 6px;
+      border-radius: var(--radius-sm);
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    /* Toast Notification */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: var(--bg-elevated);
+      color: #fff;
+      padding: 12px 20px;
+      border-radius: var(--radius-md);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+      border: 1px solid var(--border-accent);
+      font-size: 14px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      transform: translateY(100px);
+      opacity: 0;
+      transition: all 0.3s ease;
+      z-index: 100;
+    }
+
+    .toast.show {
+      transform: translateY(0);
+      opacity: 1;
+    }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .app-container {
+        flex-direction: column;
+      }
+      .sidebar {
+        width: 100%;
+        height: auto;
+        position: relative;
+        border-right: none;
+        border-bottom: 1px solid var(--border);
+      }
+      .main-content {
+        padding: 30px 20px;
+      }
+      h1.hero-title {
+        font-size: 36px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<div class="app-container">
+
+  <!-- Sidebar Navigation -->
+  <aside class="sidebar">
+    <a href="#" class="brand">
+      <div class="brand-icon">G</div>
+      <div class="brand-text">
+        <h2>gpt-audit</h2>
+        <span class="brand-badge">Universal Plugin</span>
+      </div>
+    </a>
+
+    <div class="nav-group">
+      <div class="nav-title">Getting Started</div>
+      <ul class="nav-links">
+        <li class="nav-item"><a href="#overview" class="active">Overview & Flow</a></li>
+        <li class="nav-item"><a href="#install">Installation Guide</a></li>
+        <li class="nav-item"><a href="#usage">Prompting & Usage</a></li>
+      </ul>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-title">Audit Engine</div>
+      <ul class="nav-links">
+        <li class="nav-item"><a href="#rules">Rules Catalog (R01–R15)</a></li>
+        <li class="nav-item"><a href="#sample-report">Live Audit Preview</a></li>
+        <li class="nav-item"><a href="#guardrails">Safety Guardrails</a></li>
+        <li class="nav-item"><a href="#cli">Standalone CLI / CI</a></li>
+      </ul>
+    </div>
+
+    <div class="sidebar-footer">
+      <span>v0.1.0 (Hackathon)</span>
+      <span>Node 22 ESM</span>
+    </div>
+  </aside>
+
+  <!-- Main Content Area -->
+  <main class="main-content">
+
+    <!-- Hero Section -->
+    <header class="hero" id="overview">
+      <div class="hero-badge-wrap">
+        <span class="pulse"></span>
+        <span>Cross-Agent Compatibility: Antigravity • Claude Code • Codex</span>
+      </div>
+      <h1 class="hero-title">Audit Google Publisher Tag & Ad Manager in Live Chrome</h1>
+      <p class="hero-subtitle">
+        A universal coding agent plugin that drives Google's Chrome DevTools MCP to evaluate ad slots, network calls, correlators, consent strings, and 15 deterministic anomaly rules — all running 100% locally on your machine.
+      </p>
+      <div class="hero-actions">
+        <a href="#install" class="btn btn-primary">
+          <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+          Install Plugin
+        </a>
+        <a href="#usage" class="btn btn-secondary">
+          <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          View Prompts
+        </a>
+      </div>
+
+      <!-- Flow Pipeline Grid -->
+      <div class="flow-grid">
+        <div class="flow-card">
+          <span class="flow-step-num">Step 1</span>
+          <h3>Agent Orchestration</h3>
+          <p>Agent reads <code>SKILL.md</code> and coordinates Chrome navigation with <code>init-listeners.js</code> attached.</p>
+        </div>
+        <div class="flow-card">
+          <span class="flow-step-num">Step 2</span>
+          <h3>Chrome DevTools MCP</h3>
+          <p>Automates throwaway isolated Chrome profile. Auto-accepts CMP; never clicks ad creative frames.</p>
+        </div>
+        <div class="flow-card">
+          <span class="flow-step-num">Step 3</span>
+          <h3>Snapshot & Extraction</h3>
+          <p><code>collect-gpt.js</code> reads DOM & events; <code>network-extract.js</code> parses SRA and query parameters.</p>
+        </div>
+        <div class="flow-card">
+          <span class="flow-step-num">Step 4</span>
+          <h3>Rules & Markdown Report</h3>
+          <p><code>analyze.js</code> evaluates rules R01–R10; <code>report.js</code> outputs <code>report.md</code> and <code>report.json</code>.</p>
+        </div>
+      </div>
+    </header>
+
+    <!-- Installation Section -->
+    <section id="install">
+      <div class="section-header">
+        <span class="section-tag">Setup & Configuration</span>
+        <h2 class="section-title">Install on Every AI Agent</h2>
+        <p class="section-desc">Follow the instructions for your preferred AI development environment. All three environments leverage the exact same underlying skills, rules, and scripts.</p>
+      </div>
+
+      <div class="tabs-wrapper">
+        <div class="tab-nav">
+          <button class="tab-btn active" onclick="switchTab('install', 'antigravity')">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+            Google Antigravity
+          </button>
+          <button class="tab-btn" onclick="switchTab('install', 'claude')">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10"/></svg>
+            Claude Code
+          </button>
+          <button class="tab-btn" onclick="switchTab('install', 'codex')">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm1 14.5h-2v-2h2v2zm0-4h-2V7h2v5.5z"/></svg>
+            OpenAI Codex
+          </button>
+        </div>
+
+        <!-- Antigravity Pane -->
+        <div class="tab-pane active" id="pane-install-antigravity">
+          <div class="card">
+            <h3>Google Antigravity Setup</h3>
+            <p style="color:var(--text-muted); margin: 8px 0 16px;">Antigravity reads the plugin manifest (<code>plugin.json</code>), bundled MCP configuration (<code>mcp_config.json</code>), and background agent (<code>agents/gpt-auditor.md</code>).</p>
+            
+            <h4 style="margin-top:16px; font-size:14px; color:#fff;">Option 1: Global Installation (Recommended)</h4>
+            <div class="code-box">
+              <div class="code-header">
+                <span>Terminal</span>
+                <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+              </div>
+              <pre><code>mkdir -p ~/.gemini/config/plugins
+git clone https://github.com/adtechnology/gpt-audit.git ~/.gemini/config/plugins/gpt-audit</code></pre>
+            </div>
+
+            <h4 style="margin-top:16px; font-size:14px; color:#fff;">Option 2: Antigravity CLI (<code>agy</code>)</h4>
+            <div class="code-box">
+              <div class="code-header">
+                <span>Terminal</span>
+                <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+              </div>
+              <pre><code>agy plugin install https://github.com/adtechnology/gpt-audit
+agy plugin list --json</code></pre>
+            </div>
+
+            <div style="background: rgba(251, 191, 36, 0.1); border: 1px solid rgba(251, 191, 36, 0.3); border-radius: var(--radius-sm); padding: 14px; margin-top: 16px; font-size: 13px; color: #fde68a;">
+              <strong>Note on MCP Server Name:</strong> If the built-in Chrome DevTools plugin is active in Antigravity settings (<em>Settings → Customizations → Chrome DevTools</em>), disable one to avoid duplicate server names.
+            </div>
+          </div>
+        </div>
+
+        <!-- Claude Code Pane -->
+        <div class="tab-pane" id="pane-install-claude">
+          <div class="card">
+            <h3>Claude Code Setup</h3>
+            <p style="color:var(--text-muted); margin: 8px 0 16px;">Claude Code loads the plugin via <code>.claude-plugin/plugin.json</code> and connects to Chrome DevTools MCP via <code>.mcp.json</code>.</p>
+            
+            <h4 style="margin-top:16px; font-size:14px; color:#fff;">Option 1: Marketplace Install</h4>
+            <div class="code-box">
+              <div class="code-header">
+                <span>Claude Interactive Session</span>
+                <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+              </div>
+              <pre><code>/plugin marketplace add adtechnology/gpt-audit
+/plugin install gpt-audit@gpt-audit
+/mcp  # Confirm chrome-devtools is listed</code></pre>
+            </div>
+
+            <h4 style="margin-top:16px; font-size:14px; color:#fff;">Option 2: Local Development Flag</h4>
+            <div class="code-box">
+              <div class="code-header">
+                <span>Terminal</span>
+                <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+              </div>
+              <pre><code>claude --plugin-dir /path/to/gpt-audit</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <!-- Codex Pane -->
+        <div class="tab-pane" id="pane-install-codex">
+          <div class="card">
+            <h3>OpenAI Codex Setup</h3>
+            <p style="color:var(--text-muted); margin: 8px 0 16px;">Codex reads <code>.codex-plugin/plugin.json</code> and connects through <code>.mcp.json</code>.</p>
+            
+            <h4 style="margin-top:16px; font-size:14px; color:#fff;">Option 1: Launch Inside Repo Directory</h4>
+            <div class="code-box">
+              <div class="code-header">
+                <span>Terminal</span>
+                <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+              </div>
+              <pre><code>cd /path/to/gpt-audit
+codex</code></pre>
+            </div>
+
+            <h4 style="margin-top:16px; font-size:14px; color:#fff;">Option 2: Add Remote Marketplace</h4>
+            <div class="code-box">
+              <div class="code-header">
+                <span>Terminal</span>
+                <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+              </div>
+              <pre><code>codex plugin marketplace add https://github.com/adtechnology/gpt-audit.git --sparse .agents/plugins</code></pre>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- Usage & Prompting Section -->
+    <section id="usage">
+      <div class="section-header">
+        <span class="section-tag">Prompting Guide</span>
+        <h2 class="section-title">How to Use in Any Agent</h2>
+        <p class="section-desc">Copy and paste these natural language prompts directly into your agent conversation thread.</p>
+      </div>
+
+      <div class="prompt-card">
+        <div class="prompt-text">"Audit the GPT setup on https://www.telegraph.co.uk/ and write the report to out/"</div>
+        <div class="prompt-desc">Executes the standard end-to-end audit: collects live slots, analyzes consent signals, parses network correlators, evaluates R01–R10, and generates <code>report.md</code>.</div>
+      </div>
+
+      <div class="prompt-card">
+        <div class="prompt-text">"Audit the GPT setup on https://edition.cnn.com/ and https://www.telegraph.co.uk/, compare them, and write reports to out/"</div>
+        <div class="prompt-desc">Audits both URLs in sequence, generates individual reports, and compiles <code>out/comparison.md</code> with a comparative matrix of slots, SRA status, Prebid versions, and anomalies.</div>
+      </div>
+
+      <div class="prompt-card">
+        <div class="prompt-text">"@gpt-auditor audit https://example.com/article"</div>
+        <div class="prompt-desc">Runs the audit in a background subagent in Google Antigravity, returning the report summary and file links upon completion without blocking your main conversation thread.</div>
+      </div>
+    </section>
+
+    <!-- Rule Catalog Section -->
+    <section id="rules">
+      <div class="section-header">
+        <span class="section-tag">Deterministic Engine</span>
+        <h2 class="section-title">Anomaly Rules Catalog (R01–R15)</h2>
+        <p class="section-desc">Rules are implemented as plain Node 22 ESM modules in <code>scripts/rules/</code>. No external LLM is involved in judging; the same page generates identical findings in every agent.</p>
+      </div>
+
+      <div class="catalog-controls">
+        <input type="text" id="ruleSearch" class="search-input" placeholder="Search rules, keywords, or evidence..." oninput="filterRules()">
+        <div class="filter-btn-group">
+          <button class="filter-btn active" onclick="setSeverityFilter('all', this)">All (15)</button>
+          <button class="filter-btn" onclick="setSeverityFilter('high', this)">High</button>
+          <button class="filter-btn" onclick="setSeverityFilter('medium', this)">Medium</button>
+          <button class="filter-btn" onclick="setSeverityFilter('low', this)">Low</button>
+        </div>
+      </div>
+
+      <div class="rules-grid" id="rulesGrid">
+        <!-- R01 -->
+        <div class="rule-card" data-severity="high">
+          <div class="rule-top">
+            <span class="rule-id">R01</span>
+            <span class="badge-sev high">High</span>
+          </div>
+          <div class="rule-name">Slot Defined but Never Displayed</div>
+          <div class="rule-evidence">Slot exists in pubads but has no queryId, no response, and was never named in an ad request.</div>
+          <div class="rule-fix">Call <code>googletag.display(id)</code> or remove slot definition.</div>
+        </div>
+
+        <!-- R02 -->
+        <div class="rule-card" data-severity="high">
+          <div class="rule-top">
+            <span class="rule-id">R02</span>
+            <span class="badge-sev high">High</span>
+          </div>
+          <div class="rule-name">DOM Container Missing or Duplicate</div>
+          <div class="rule-evidence">Container div does not exist in the DOM (<code>dom.exists: false</code>) or duplicate element IDs are defined.</div>
+          <div class="rule-fix">Ensure unique container div exists in DOM with matching elementId.</div>
+        </div>
+
+        <!-- R03 -->
+        <div class="rule-card" data-severity="medium">
+          <div class="rule-top">
+            <span class="rule-id">R03</span>
+            <span class="badge-sev medium">Medium</span>
+          </div>
+          <div class="rule-name">Unfilled Slot</div>
+          <div class="rule-evidence">Slot requested but returned empty (<code>render.isEmpty: true</code>). AdX/OB backfill is properly recognized as filled.</div>
+          <div class="rule-fix">Check line-item targeting, price floors, and advertiser demand.</div>
+        </div>
+
+        <!-- R04 -->
+        <div class="rule-card" data-severity="medium">
+          <div class="rule-top">
+            <span class="rule-id">R04</span>
+            <span class="badge-sev medium">Medium</span>
+          </div>
+          <div class="rule-name">No Requested Size Fits Viewport</div>
+          <div class="rule-evidence">All requested fixed sizes exceed viewport width (<code>1x1</code> and <code>fluid</code> exempt).</div>
+          <div class="rule-fix">Configure responsive sizeMapping or smaller creative sizes.</div>
+        </div>
+
+        <!-- R05 -->
+        <div class="rule-card" data-severity="medium">
+          <div class="rule-top">
+            <span class="rule-id">R05</span>
+            <span class="badge-sev medium">Medium</span>
+          </div>
+          <div class="rule-name">Container Size Mismatch (CLS)</div>
+          <div class="rule-evidence">Container height differs from creative by > 2px, or container lacks reserved height (<code>reservedHeight: false</code>).</div>
+          <div class="rule-fix">Reserve container min-height per breakpoint via CSS (CLS prevention).</div>
+        </div>
+
+        <!-- R06 -->
+        <div class="rule-card" data-severity="low">
+          <div class="rule-top">
+            <span class="rule-id">R06</span>
+            <span class="badge-sev low">Low</span>
+          </div>
+          <div class="rule-name">Single Request Architecture Off</div>
+          <div class="rule-evidence">Multiple display ad requests fired independently without SRA batching (<code>iu_parts</code>). Video excluded.</div>
+          <div class="rule-fix">Call <code>googletag.pubads().enableSingleRequest()</code> before enableServices.</div>
+        </div>
+
+        <!-- R07 -->
+        <div class="rule-card" data-severity="high">
+          <div class="rule-top">
+            <span class="rule-id">R07</span>
+            <span class="badge-sev high">High</span>
+          </div>
+          <div class="rule-name">Mixed Correlators in Page View</div>
+          <div class="rule-evidence">More than one distinct correlator ID across display requests of a single page view. Video excluded.</div>
+          <div class="rule-fix">Ensure all initial slots are batched; check for repeated display() calls.</div>
+        </div>
+
+        <!-- R08 -->
+        <div class="rule-card" data-severity="high">
+          <div class="rule-top">
+            <span class="rule-id">R08</span>
+            <span class="badge-sev high">High</span>
+          </div>
+          <div class="rule-name">Initial Load Disabled, Never Refreshed</div>
+          <div class="rule-evidence"><code>pubads().disableInitialLoad()</code> is active but zero display requests were fired and no refresh occurred.</div>
+          <div class="rule-fix">Add timeout fallback to invoke <code>googletag.pubads().refresh()</code>.</div>
+        </div>
+
+        <!-- R09 -->
+        <div class="rule-card" data-severity="high">
+          <div class="rule-top">
+            <span class="rule-id">R09</span>
+            <span class="badge-sev high">High</span>
+          </div>
+          <div class="rule-name">Consent Mismatch (GDPR / TCF)</div>
+          <div class="rule-evidence"><code>gdpr=1</code> with empty TC string, or no <code>__tcfapi</code>, or Purpose 1 denied while omitting npa=1/ltd=1.</div>
+          <div class="rule-fix">Ensure CMP passes valid TC string before GPT calls; set npa=1/ltd=1.</div>
+        </div>
+
+        <!-- R10 -->
+        <div class="rule-card" data-severity="medium">
+          <div class="rule-top">
+            <span class="rule-id">R10</span>
+            <span class="badge-sev medium">Medium</span>
+          </div>
+          <div class="rule-name">Legacy or Duplicate gpt.js</div>
+          <div class="rule-evidence">Loaded from legacy <code>googletagservices.com</code>, multiple script tags, or tag lacks async attribute.</div>
+          <div class="rule-fix">Load single async tag from <code>securepubads.g.doubleclick.net/tag/js/gpt.js</code>.</div>
+        </div>
+
+        <!-- R11-R15 (Planned) -->
+        <div class="rule-card" data-severity="high">
+          <div class="rule-top">
+            <span class="rule-id">R11 (Planned)</span>
+            <span class="badge-sev high">High</span>
+          </div>
+          <div class="rule-name">Command Queue Never Flushed</div>
+          <div class="rule-evidence"><code>cmdQueueLength > 0</code> after load and <code>pubadsReady === false</code>.</div>
+          <div class="rule-fix">Verify <code>googletag.enableServices()</code> ran without uncaught callback errors.</div>
+        </div>
+
+        <div class="rule-card" data-severity="medium">
+          <div class="rule-top">
+            <span class="rule-id">R12 (Planned)</span>
+            <span class="badge-sev medium">Medium</span>
+          </div>
+          <div class="rule-name">Refresh Interval Under 30 Seconds</div>
+          <div class="rule-evidence">Probe recorded two <code>slotRequested</code> events for one slot less than 30s apart.</div>
+          <div class="rule-fix">Enforce policy mandated 30-second minimum refresh intervals.</div>
+        </div>
+
+        <div class="rule-card" data-severity="high">
+          <div class="rule-top">
+            <span class="rule-id">R13 (Planned)</span>
+            <span class="badge-sev high">High</span>
+          </div>
+          <div class="rule-name">Targeting Contains PII / Oversized</div>
+          <div class="rule-evidence">Regex detected email/phone/UUID in targeting or ad request URL > 8 000 chars.</div>
+          <div class="rule-fix">Hash or remove PII keys; trim excessive targeting parameters.</div>
+        </div>
+
+        <div class="rule-card" data-severity="medium">
+          <div class="rule-top">
+            <span class="rule-id">R14 (Planned)</span>
+            <span class="badge-sev medium">Medium</span>
+          </div>
+          <div class="rule-name">Prebid Keys Present Without Winning Bid</div>
+          <div class="rule-evidence"><code>hb_*</code> targeting present without bid response, or bidderTimeout lower than response times.</div>
+          <div class="rule-fix">Review <code>pbjs.setTargetingForGPTAsync()</code> timing; raise bidderTimeout.</div>
+        </div>
+
+        <div class="rule-card" data-severity="low">
+          <div class="rule-top">
+            <span class="rule-id">R15 (Planned)</span>
+            <span class="badge-sev low">Low</span>
+          </div>
+          <div class="rule-name">Slot Never Viewable</div>
+          <div class="rule-evidence">No <code>impressionViewable</code> fired after full scroll pass; slot located far below the fold without lazy load.</div>
+          <div class="rule-fix">Enable GPT lazy loading (<code>googletag.pubads().enableLazyLoad()</code>).</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Live Audit Preview -->
+    <section id="sample-report">
+      <div class="section-header">
+        <span class="section-tag">Audit Results Showcase</span>
+        <h2 class="section-title">Live Audit: The Telegraph</h2>
+        <p class="section-desc">Sample audit output generated on <code>https://www.telegraph.co.uk/</code> demonstrating slot classification, consent verification, and AdX/Open Bidding fill reporting.</p>
+      </div>
+
+      <div class="metrics-banner">
+        <div class="metric-card">
+          <div class="metric-num" style="color:var(--primary)">202610090101</div>
+          <div class="metric-lbl">GPT Version</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-num">3</div>
+          <div class="metric-lbl">Slots Defined</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-num">5</div>
+          <div class="metric-lbl">GAM Calls (3 Display / 2 Video)</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-num" style="color:var(--accent-emerald)">1 234 chars</div>
+          <div class="metric-lbl">TCF Consent String</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-num" style="color:var(--accent-amber)">2 Med / 0 High</div>
+          <div class="metric-lbl">Findings Count</div>
+        </div>
+      </div>
+
+      <h3 style="font-size:18px; margin: 24px 0 12px; color:#fff;">Slot Render Event Details (AdX/OB vs Unfilled)</h3>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Element ID</th>
+              <th>Ad Unit Path</th>
+              <th>Requested Sizes</th>
+              <th>Rendered Size</th>
+              <th>Line Item ID</th>
+              <th>Backfill Flag</th>
+              <th>Fill Classification</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>advert_tmg_ban</code></td>
+              <td><code>/6582/tmg.telegraph.portal/portal</code></td>
+              <td>970×250, 940×250, 900×250, 1×1, fluid</td>
+              <td>970×250</td>
+              <td><code>7286103018</code></td>
+              <td><code>false</code></td>
+              <td><span class="tag-direct">Direct Line Item</span></td>
+            </tr>
+            <tr>
+              <td><code>advert_tmg_tmg</code></td>
+              <td><code>/6582/tmg.telegraph.portal/portal</code></td>
+              <td>1×1</td>
+              <td>none</td>
+              <td>null</td>
+              <td><code>false</code></td>
+              <td><span class="tag-unfilled">Unfilled (R03)</span></td>
+            </tr>
+            <tr>
+              <td><code>advert_tmg_ftr</code></td>
+              <td><code>/6582/tmg.telegraph.portal/portal</code></td>
+              <td>1×1</td>
+              <td>none</td>
+              <td>null</td>
+              <td><code>false</code></td>
+              <td><span class="tag-unfilled">Unfilled (R03)</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Safety Guardrails -->
+    <section id="guardrails">
+      <div class="section-header">
+        <span class="section-tag">Zero Invalid Traffic</span>
+        <h2 class="section-title">Strict Browser Guardrails</h2>
+        <p class="section-desc">Automated web auditing must protect publisher integrity. These non-negotiable rules govern every execution.</p>
+      </div>
+
+      <div class="flow-grid">
+        <div class="flow-card">
+          <div style="font-size:24px; margin-bottom:12px;">🚫</div>
+          <h3>Never Touch Ad Creatives</h3>
+          <p>The agent never clicks, hovers, focuses, or scrolls into any <code>google_ads_iframe_*</code> or ad creative. Clicking ads constitutes invalid traffic (IVT).</p>
+        </div>
+        <div class="flow-card">
+          <div style="font-size:24px; margin-bottom:12px;">🔒</div>
+          <h3>Read-Only Execution</h3>
+          <p>Never calls <code>googletag.display()</code>, <code>pubads().refresh()</code>, or <code>destroySlots()</code> on third-party pages.</p>
+        </div>
+        <div class="flow-card">
+          <div style="font-size:24px; margin-bottom:12px;">🍪</div>
+          <h3>CMP Auto-Accept Only</h3>
+          <p>Accepting the cookie consent dialog is the only permissible click in an entire audit run. Never rejects or explores settings.</p>
+        </div>
+        <div class="flow-card">
+          <div style="font-size:24px; margin-bottom:12px;">⚡</div>
+          <h3>Single Load Guarantee</h3>
+          <p>Exactly one page load per URL. No automatic retries or reload loops.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Standalone CLI Section -->
+    <section id="cli">
+      <div class="section-header">
+        <span class="section-tag">Developer & CI Automation</span>
+        <h2 class="section-title">Standalone CLI Pipeline</h2>
+        <p class="section-desc">Run the parser, analyzer, and reporter directly in Node.js without driving a browser.</p>
+      </div>
+
+      <div class="code-box">
+        <div class="code-header">
+          <span>Terminal (Node 22 ESM)</span>
+          <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+        </div>
+        <pre><code># 1. Parse raw MCP DevTools output to structured network.json
+npm run extract -- out/www.telegraph.co.uk/network-raw.txt -o out/www.telegraph.co.uk/network.json
+
+# 2. Run deterministic rule engine (R01-R10)
+npm run analyze -- out/www.telegraph.co.uk/snapshot.json out/www.telegraph.co.uk/network.json -o out/www.telegraph.co.uk/findings.json
+
+# 3. Generate report.md and report.json
+npm run report -- out/www.telegraph.co.uk/snapshot.json out/www.telegraph.co.uk/network.json out/www.telegraph.co.uk/findings.json -o out/www.telegraph.co.uk/
+
+# 4. Multi-host comparison
+node skills/gpt-audit/scripts/report.js --compare out/*/report.json -o out/comparison.md</code></pre>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- Toast for copy feedback -->
+<div id="toast" class="toast">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+  <span>Copied to clipboard!</span>
+</div>
+
+<script>
+  // Tab Switching Logic
+  function switchTab(group, name) {
+    const parent = document.querySelector('.tabs-wrapper');
+    parent.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+    parent.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
+
+    event.currentTarget.classList.add('active');
+    document.getElementById(`pane-${group}-${name}`).classList.add('active');
+  }
+
+  // Copy to Clipboard
+  function copyCode(btn) {
+    const code = btn.closest('.code-box').querySelector('code').innerText;
+    navigator.clipboard.writeText(code).then(() => {
+      showToast('Copied to clipboard!');
+    });
+  }
+
+  function showToast(msg) {
+    const toast = document.getElementById('toast');
+    toast.querySelector('span').innerText = msg;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 2500);
+  }
+
+  // Rule Filtering
+  let activeSeverity = 'all';
+
+  function setSeverityFilter(sev, btn) {
+    activeSeverity = sev;
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    filterRules();
+  }
+
+  function filterRules() {
+    const query = document.getElementById('ruleSearch').value.toLowerCase();
+    const cards = document.querySelectorAll('.rule-card');
+
+    cards.forEach(card => {
+      const sev = card.getAttribute('data-severity');
+      const text = card.innerText.toLowerCase();
+      const matchesSev = activeSeverity === 'all' || sev === activeSeverity;
+      const matchesQuery = !query || text.includes(query);
+
+      card.style.display = (matchesSev && matchesQuery) ? 'flex' : 'none';
+    });
+  }
+
+  // Active navigation link highlighting on scroll
+  window.addEventListener('scroll', () => {
+    const sections = document.querySelectorAll('section, header.hero');
+    const scrollPos = window.scrollY + 200;
+
+    sections.forEach(sec => {
+      const id = sec.getAttribute('id');
+      if (!id) return;
+      const top = sec.offsetTop;
+      const height = sec.offsetHeight;
+      const link = document.querySelector(`.nav-item a[href="#${id}"]`);
+
+      if (link && scrollPos >= top && scrollPos < top + height) {
+        document.querySelectorAll('.nav-item a').forEach(a => a.classList.remove('active'));
+        link.classList.add('active');
+      }
+    });
+  });
+</script>
+
+</body>
+</html>

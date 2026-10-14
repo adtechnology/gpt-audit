@@ -8,6 +8,7 @@ Packaged as a single cross-platform plugin that installs in **Google Antigravity
 
 ## Quick Links
 
+- 🌐 **[Interactive HTML Docs](docs/index.html)** — View the interactive web documentation portal (`npm run docs`).
 - 📖 **[Installation Guide](docs/INSTALL.md)** — Step-by-step installation for Google Antigravity, Claude Code, and OpenAI Codex.
 - 🚀 **[Usage Guide](docs/USAGE.md)** — Natural language prompt examples, subagent commands, output artifacts, and CLI instructions.
 - 📋 **[Anomaly Catalog](skills/gpt-audit/references/anomaly-catalog.md)** — Description, severity, evidence, and remediation for rules R01–R15.
