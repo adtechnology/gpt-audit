@@ -31,6 +31,11 @@ Agent (reads skills/gpt-audit/SKILL.md, orchestrates only)
 
 Everything runs locally on your laptop. Nothing is deployed, and no external API keys or cloud services are required. The agent only drives the browser and runs the scripts; the analysis is 100% deterministic code, guaranteeing identical findings regardless of which agent you use.
 
+Findings marked `needs-validation` are contextual observations, not confirmed failures. Hidden slots,
+refresh correlators and layout reservations receive qualified findings; unknown status, timing and
+configuration remain unknown. Optional navigation listeners capture initial GPT events, and passive
+Resource Timing can enrich request timing. See the [evidence review guide](skills/gpt-audit/references/evidence-review.md).
+
 ---
 
 ## Quick Install
@@ -95,7 +100,7 @@ You can also run the deterministic analysis pipeline without an interactive agen
 
 ```bash
 # Extract network data
-npm run extract -- out/<host>/network-raw.txt -o out/<host>/network.json
+npm run extract -- out/<host>/network-raw.txt --timings out/<host>/snapshot.json -o out/<host>/network.json
 
 # Run rule engine
 npm run analyze -- out/<host>/snapshot.json out/<host>/network.json -o out/<host>/findings.json

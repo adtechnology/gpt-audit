@@ -2,21 +2,22 @@
 
 Rule IDs are stable; the analyzer, the report, the test suite, and the demo fixture refer to them.
 Severity levels: `high`, `medium`, `low`.
+`status: "needs-validation"` distinguishes observations requiring publisher context from confirmed failures.
 Evidence names the exact fields of `snapshot.json` (collector) and `network.json` (network-extract).
 
 ## Implemented Rules (R01–R10)
 
 | ID | Rule | Severity | Status | Evidence (snapshot / network) | Fix in the report |
 | --- | --- | --- | --- | --- | --- |
-| R01 | Slot defined but never requested or displayed | High | Implemented | Slot in `slots[]` has no `response`, no `dom.queryId`, no `slotRequested` events, and no `gampad/ads` display request mentions its ad unit or elementId | Call `googletag.display(id)` or remove the definition |
+| R01 | Slot has no observed request | High / Low validation | Implemented | No response, queryId, request event or matching network identity. Explicit `slotElementIds`/`dids` outrank shared ad-unit paths; MCM separators normalized. Hidden/inactive slots are low, needs-validation | Check activation, breakpoint and request lifecycle before changing display registration |
 | R02 | Slot div missing in DOM or duplicated | High | Implemented | `dom.exists` is false, or two or more slots in `slots[]` share the same `elementId` | Ensure a unique container div exists in DOM with matching id |
 | R03 | Unfilled slot | Medium | Implemented | `slot.render.isEmpty === true`. (Note: filled slots with `lineItemId: null` and `isBackfill: true` are AdX/Open Bidding fills and are not flagged as unfilled) | Check line-item targeting, floor prices, and advertiser demand for the ad unit |
 | R04 | No requested size fits the viewport | Medium | Implemented | Every entry of `sizes` is wider than `meta.viewport.w`. (`1x1` and `fluid` sizes fit any container and are exempt) | Configure responsive `sizeMapping` or include smaller creative sizes for narrow screens |
-| R05 | Container size differs from rendered creative | Medium | Implemented | Rendered creative height differs from container `dom.boundingRect.height` by > 2 px, or `dom.reservedHeight` is false. (`1x1` and `fluid` exempt) | Reserve container min-height per breakpoint via CSS matching creative height to prevent CLS |
-| R06 | Single Request Architecture off | Low | Implemented | Number of `kind: "display"` `gampad/ads` requests ≥ requested slot count (≥ 2) and no request contains `iu_parts` or `enc_prev_ius` (video requests excluded) | Call `googletag.pubads().enableSingleRequest()` before `enableServices()` |
-| R07 | Mixed correlators in one page view | High | Implemented | More than one distinct `correlator` across `kind: "display"` ad requests in one page view (video requests carry independent correlators) | Ensure initial slots are requested in a single batched call; eliminate repeated `display()` calls |
+| R05 | Fixed-size creative exceeds visible placement geometry | Medium | Implemented | Positive fixed creative dimensions exceed a visible slot or clipping ancestor. Hidden, fluid/native, tracking and wrapper-reserved cases are excluded; extra container height alone is not a defect | Check intended overflow/clipping and available placement space; measure CLS separately |
+| R06 | Individual requests offer a batching opportunity | Low | Implemented | Multiple distinct display identities are requested without observed SRA encoding; refresh-only/video traffic excluded | Consider `googletag.setConfig({singleRequest: true})` before enabling services when batching fits publisher needs |
+| R07 | Multiple correlators observed | Low validation | Implemented | Distinct display correlators with request-group evidence; refresh can legitimately change correlators | Validate refresh/page-view boundaries and ordering; do not infer duplicate display calls from correlators alone |
 | R08 | Initial load disabled but nothing ever refreshed | High | Implemented | `gpt.initialLoadDisabled === true`, zero `kind: "display"` requests fired, and no probe `slotRequested` events | Add a fallback timeout in header bidding to trigger `googletag.pubads().refresh()` |
-| R09 | Consent mismatch | High | Implemented | `gdpr=1` with empty/missing `gdpr_consent` (length 0); or `gdpr=1` without `window.__tcfapi` present; or TCF purpose 1 consent false while ad requests omit both `npa=1` and `ltd=1` | Verify CMP wiring passes a valid TC string before GPT requests, or set `npa=1`/`ltd=1` when Purpose 1 consent is denied |
+| R09 | Consent signaling needs validation | Medium validation | Implemented | `gdpr=1` with a missing/empty captured TC string unless explicit limited-ads mode applies. P1 denial or an absent top-level CMP alone is insufficient | Validate request timing, applicable mode and CMP integration; this is not a legal compliance verdict |
 | R10 | Legacy or duplicate gpt.js | Medium | Implemented | `gpt.legacyHost === true` (`googletagservices.com`), more than one gpt.js script tag, or a script tag without `async` | Load exactly one asynchronous tag from `https://securepubads.g.doubleclick.net/tag/js/gpt.js` |
 | R16 | Publisher mandatory parameter missing | High / Medium | Implemented | Snapshot or ad requests lack parameters specified in publisher config (`gpt-audit.config.json`): missing PPID, missing required `cust_params`, missing page targeting, or missing slot targeting | Ensure mandatory parameters are passed in GPT targeting or set via `pubads().setPublisherProvidedId(...)` |
 
@@ -37,7 +38,11 @@ Evidence names the exact fields of `snapshot.json` (collector) and `network.json
   "id": "R05",
   "severity": "medium",
   "slot": "advert_tmg_ban",
-  "evidence": "container #advert_tmg_ban height (100px) differs from creative height (250px) by 150px",
-  "fix": "reserve container min-height matching creative height (250px) to eliminate layout shift"
+  "evidence": "fixed creative exceeds its visible clipping container",
+  "fix": "check the active creative placement and clipping styles; measure CLS separately"
 }
 ```
+
+See [evidence-review.md](evidence-review.md) for contextual review and primary references. Unknown
+configuration, status and timing stay unknown in reports. The HTML rule score excludes validation
+observations and does not establish complete site health or compliance.
