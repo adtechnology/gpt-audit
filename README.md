@@ -157,10 +157,28 @@ GAM was reached only through ad-server passback creatives:
   CMP buttons inside cross-origin iframes with a verbose snapshot, and fetches the `gpt.js` / `pubads_impl`
   request details right after consent, before the DevTools request buffer evicts them.
 
+## What changed in 0.2.1
+
+- **TCF v2 decoder** (`scripts/tcf.js`): decodes the TC string core segment (purpose consents and
+  legitimate interests 1–10, special features, Google vendor 755), merges it with the live `__tcfapi`
+  state and the `gdpr_consent` seen on the network, and rates GAM eligibility (personalized,
+  non-personalized, limited ads). The report gets a "TCF v2 Consent & Purpose Analysis" section with
+  CMP details and health checks; `report.json` carries `tcf`, `consent.purposeConsents`, `prebid` and
+  the `sra` / `lazyLoad` / `initialLoadDisabled` flags.
+- **R13 implemented**: targeting values that look like e-mail addresses, phone numbers or explicit PII
+  keys in slot/page targeting, `cust_params`, `scp` or `prev_scp`, and ad request URLs over 8 000 chars.
+- **R09** adds two checks: ad requests fired while `eventStatus` is `cmpuishown` (High) and a network
+  `gdpr_consent` that differs from the `__tcfapi` `tcString` (Medium); Purpose 1 is read from the
+  decoded purposes as well.
+- **R02** flags duplicate DOM ids (`dom.count > 1`), not only slots sharing an `elementId`.
+- **R04** also fires when every fixed size is wider than the slot container (`dom.boundingRect.width`),
+  and no longer needs a viewport width to run.
+- Multi-URL comparison report fixed.
+
 ## Development & Testing
 
 ```bash
-# Run unit test suite (24 tests)
+# Run unit test suite (26 tests)
 npm test
 
 # Syntax-check all Node scripts

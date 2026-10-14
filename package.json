@@ -1,6 +1,6 @@
 {
   "name": "gpt-audit",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "description": "Audit the Google Publisher Tag setup of a page in a live Chrome. Plugin for Antigravity, Claude Code and Codex.",
