@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gpt-audit fixture: planted anomalies</title>
+<!--
+  Fixture for the gpt-audit demo. Every anomaly below is planted on purpose and maps to a rule id in
+  skills/gpt-audit/references/anomaly-catalog.md. Ad units come from Google's sample network 6355419
+  (the same ones the google-publisher-tag-samples repo uses); they serve test creatives on any host.
+  Serve with fixtures/serve.sh and open http://localhost:8787/broken-page.html
+-->
+
+<!-- R10: two gpt.js tags, the first from the legacy host and synchronous -->
+<script src="https://www.googletagservices.com/tag/js/gpt.js"></script>
+<script async src="https://securepubads.g.doubleclick.net/tag/js/gpt.js"></script>
+
+<script>
+  // R09: TCF v2 stub that says the GDPR applies but never produces a TC string.
+  // GPT will send gdpr=1 with an empty gdpr_consent on every ad request.
+  (function () {
+    var tcData = { gdprApplies: true, tcString: '', eventStatus: 'tcloaded', cmpStatus: 'loaded',
+                   cmpId: 0, tcfPolicyVersion: 2, listenerId: 1, purpose: { consents: {}, legitimateInterests: {} } };
+    window.__tcfapi = function (command, version, callback) {
+      if (command === 'addEventListener' || command === 'getTCData') { callback(tcData, true); return; }
+      if (command === 'removeEventListener') { callback(true); return; }
+      if (command === 'ping') { callback({ gdprApplies: true, cmpLoaded: true, cmpStatus: 'loaded', displayStatus: 'disabled', apiVersion: '2.0', cmpId: 0 }, true); return; }
+      callback(null, false);
+    };
+  })();
+
+  window.googletag = window.googletag || { cmd: [] };
+  googletag.cmd.push(function () {
+    var pubads = googletag.pubads();
+
+    // R13: page-level targeting that looks like PII
+    pubads.setTargeting('email', 'test@example.com');
+    pubads.setTargeting('section', 'fixture');
+
+    // Slot A: control, defined and displayed correctly
+    googletag.defineSlot('/6355419/Travel/Europe/France/Paris', [300, 250], 'div-gpt-ad-a').addService(pubads);
+
+    // Slot B: defined, but display() is never called (R01)
+    googletag.defineSlot('/6355419/Travel/Europe', [728, 90], 'div-gpt-ad-b').addService(pubads);
+
+    // Slot C: its container id exists twice in the DOM (R02)
+    googletag.defineSlot('/6355419/Travel/Europe/France/Paris', [300, 250], 'div-gpt-ad-c').addService(pubads);
+
+    // Slot D: 300x250 creative rendered into a box forced to 300x100, no min-height (R05)
+    googletag.defineSlot('/6355419/Travel/Europe/France/Paris', [300, 250], 'div-gpt-ad-d').addService(pubads);
+
+    // Slot E: the only requested size is 970x250 inside a 300 px wide column (R04)
+    googletag.defineSlot('/6355419/Travel/Europe', [970, 250], 'div-gpt-ad-e').addService(pubads);
+
+    // R06: enableSingleRequest() is deliberately NOT called → one request per slot
+    googletag.enableServices();
+  });
+</script>
+
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; color: #222; }
+  header { padding: 16px 24px; border-bottom: 1px solid #ddd; }
+  main { display: grid; grid-template-columns: 1fr 300px; gap: 24px; padding: 24px; max-width: 1100px; margin: 0 auto; }
+  article p { line-height: 1.6; }
+  .ad { background: #f4f4f4; border: 1px dashed #bbb; margin: 16px 0; }
+  .ad small { display: block; font-size: 11px; color: #777; padding: 2px 4px; }
+  /* Slot D: the box is forced to 300x100 and hides the overflow of the 300x250 creative */
+  #div-gpt-ad-d { width: 300px; height: 100px; overflow: hidden; }
+  aside { width: 300px; }
+  .spacer { height: 1400px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>gpt-audit fixture</h1>
+  <small>Planted: R01 (slot B), R02 (slot C), R04 (slot E), R05 (slot D), R06 (no SRA), R09 (TCF stub), R10 (legacy + duplicate gpt.js), R13 (PII targeting)</small>
+</header>
+
+<main>
+  <article>
+    <h2>Control and broken slots</h2>
+    <p>Slot A below is the control: defined, displayed, 300x250, nothing wrong with it.</p>
+    <div class="ad" id="div-gpt-ad-a">
+      <small>slot A · control</small>
+      <script>googletag.cmd.push(function () { googletag.display('div-gpt-ad-a'); });</script>
+    </div>
+
+    <p>Slot B is defined in the head but <code>googletag.display()</code> is never called for it.</p>
+    <div class="ad" id="div-gpt-ad-b"><small>slot B · never displayed (R01)</small></div>
+
+    <p>Slot C's container id appears twice on this page.</p>
+    <div class="ad" id="div-gpt-ad-c">
+      <small>slot C · duplicate id, first copy (R02)</small>
+      <script>googletag.cmd.push(function () { googletag.display('div-gpt-ad-c'); });</script>
+    </div>
+
+    <p>Slot D requests a 300x250 but its box is forced to 300x100 with hidden overflow and no min-height.</p>
+    <div class="ad" id="div-gpt-ad-d">
+      <small>slot D · 300x250 into 300x100 (R05)</small>
+      <script>googletag.cmd.push(function () { googletag.display('div-gpt-ad-d'); });</script>
+    </div>
+
+    <div class="spacer"></div>
+    <p>Second copy of slot C's container id, far below the fold.</p>
+    <div class="ad" id="div-gpt-ad-c"><small>slot C · duplicate id, second copy (R02)</small></div>
+  </article>
+
+  <aside>
+    <p>This column is 300 px wide. Slot E only knows 970x250.</p>
+    <div class="ad" id="div-gpt-ad-e">
+      <small>slot E · 970x250 in a 300 px column (R04)</small>
+      <script>googletag.cmd.push(function () { googletag.display('div-gpt-ad-e'); });</script>
+    </div>
+  </aside>
+</main>
+</body>
+</html>

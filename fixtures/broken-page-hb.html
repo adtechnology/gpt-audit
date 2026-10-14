@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gpt-audit fixture: initial load disabled, never refreshed</title>
+<!--
+  Fixture for rule R08 only. Header-bidding setups call disableInitialLoad() and rely on a later
+  pubads().refresh() once the bids are in. Here the refresh never comes (as when the wrapper fails and
+  no timeout fallback exists), so the page makes zero ad requests and the slot stays blank.
+  Kept separate from broken-page.html because disableInitialLoad() is page-level and would stop every request there.
+-->
+<script async src="https://securepubads.g.doubleclick.net/tag/js/gpt.js"></script>
+<script>
+  window.googletag = window.googletag || { cmd: [] };
+  googletag.cmd.push(function () {
+    var pubads = googletag.pubads();
+    pubads.disableInitialLoad();          // R08: initial load off ...
+    pubads.enableSingleRequest();
+    googletag.defineSlot('/6355419/Travel/Europe/France/Paris', [300, 250], 'div-gpt-ad-hb').addService(pubads);
+    googletag.enableServices();
+    // ... and no pubads.refresh() ever follows.
+  });
+</script>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; color: #222; }
+  main { padding: 24px; max-width: 800px; margin: 0 auto; }
+  .ad { background: #f4f4f4; border: 1px dashed #bbb; min-height: 250px; width: 300px; }
+  .ad small { display: block; font-size: 11px; color: #777; padding: 2px 4px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>gpt-audit fixture: header bidding without fallback</h1>
+  <p>Initial load is disabled and <code>refresh()</code> is never called. Expect zero ad requests and finding R08.</p>
+  <div class="ad" id="div-gpt-ad-hb">
+    <small>slot HB · never refreshed (R08)</small>
+    <script>googletag.cmd.push(function () { googletag.display('div-gpt-ad-hb'); });</script>
+  </div>
+</main>
+</body>
+</html>

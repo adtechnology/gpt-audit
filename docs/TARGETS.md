@@ -1,0 +1,18 @@
+# Audit targets
+
+One URL per line. The agent audits each with one page load, accepts the CMP, never clicks a creative.
+
+## Fixture (always first)
+
+- http://localhost:8787/broken-page.html — planted anomalies R01, R02, R04, R05, R06, R09, R10, R13
+- http://localhost:8787/broken-page-hb.html — planted anomaly R08
+
+## Property I control
+
+- <add URL>
+
+## Foreign properties (variety: one with Prebid, one with SRA on, one with lazy loading)
+
+- <add URL>
+- <add URL>
+- <add URL>

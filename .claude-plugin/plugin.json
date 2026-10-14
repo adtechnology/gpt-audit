@@ -1,0 +1,5 @@
+{
+  "name": "gpt-audit",
+  "version": "0.1.0",
+  "description": "Audit the Google Publisher Tag setup of a page: slots, ad requests, consent, anomalies, report."
+}

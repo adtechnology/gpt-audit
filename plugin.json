@@ -1,0 +1,5 @@
+{
+  "$schema": "https://antigravity.google/schemas/v1/plugin.json",
+  "name": "gpt-audit",
+  "description": "Audit the Google Publisher Tag setup of a page in a live Chrome: slots, ad requests, consent, anomalies, report."
+}

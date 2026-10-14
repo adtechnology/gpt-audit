@@ -1,0 +1,7 @@
+{
+  "name": "gpt-audit",
+  "owner": { "name": "adtechnology" },
+  "plugins": [
+    { "name": "gpt-audit", "source": "./", "description": "GPT setup audit in a live Chrome via Chrome DevTools MCP" }
+  ]
+}

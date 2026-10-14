@@ -1,0 +1,18 @@
+{
+  "name": "gpt-audit",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Audit the Google Publisher Tag setup of a page in a live Chrome. Plugin for Antigravity, Claude Code and Codex.",
+  "license": "MIT",
+  "repository": "https://github.com/adtechnology/gpt-audit",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "check": "node --check skills/gpt-audit/scripts/collect-gpt.js && node --check skills/gpt-audit/scripts/network-extract.js && node --check skills/gpt-audit/scripts/analyze.js && node --check skills/gpt-audit/scripts/report.js",
+    "extract": "node skills/gpt-audit/scripts/network-extract.js",
+    "analyze": "node skills/gpt-audit/scripts/analyze.js",
+    "report": "node skills/gpt-audit/scripts/report.js",
+    "fixture": "bash fixtures/serve.sh",
+    "test": "node --test \"skills/gpt-audit/scripts/tests/**/*.test.js\""
+  }
+}

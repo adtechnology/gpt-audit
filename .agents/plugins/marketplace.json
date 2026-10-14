@@ -1,0 +1,12 @@
+{
+  "name": "gpt-audit-local",
+  "interface": { "displayName": "GPT Audit (this repo)" },
+  "plugins": [
+    {
+      "name": "gpt-audit",
+      "source": { "source": "local", "path": "./" },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+      "category": "Productivity"
+    }
+  ]
+}
