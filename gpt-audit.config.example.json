@@ -1,0 +1,17 @@
+{
+  "$schema": "./gpt-audit.config.schema.json",
+  "publisher": "Example Media Network",
+  "version": "1.0",
+  "required": {
+    "ppid": true,
+    "custParams": ["section", "user_tier"],
+    "pageTargeting": ["env", "edition"],
+    "slotTargeting": ["pos"],
+    "minSlots": 1,
+    "requireSra": false,
+    "requireSafeFrame": false
+  },
+  "slots": {
+    "requiredElementIds": []
+  }
+}

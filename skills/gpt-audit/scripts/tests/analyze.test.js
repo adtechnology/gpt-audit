@@ -161,3 +161,126 @@ test('analyze: triggers R01, R05, R06, R07, and R09 on synthetic fixture', async
   assert.ok(compMd.includes('Multi-Host Comparison'));
   assert.ok(compMd.includes('fixture.example.com'));
 });
+
+test('analyze: R16 flags missing publisher mandatory parameters (PPID, custParams, pageTargeting)', async () => {
+  const snapshot = {
+    meta: { url: 'https://publisher.example.com' },
+    gpt: {
+      present: true,
+      pageTargeting: { env: 'prod' } // Missing required 'section' and 'edition'
+    },
+    slots: [
+      { elementId: 'slot_header', sizes: [[728, 90]], targeting: {} } // Missing 'pos'
+    ]
+  };
+
+  const network = {
+    requests: [
+      {
+        kind: 'display',
+        isSra: false,
+        ppid: false, // Missing PPID
+        cust_params: { env: 'prod' } // Missing 'user_tier'
+      }
+    ]
+  };
+
+  const config = {
+    publisher: 'Test Publisher Media',
+    required: {
+      ppid: true,
+      custParams: ['user_tier'],
+      pageTargeting: ['env', 'section'],
+      slotTargeting: ['pos'],
+      minSlots: 2,
+      requiredElementIds: ['slot_header', 'slot_sidebar']
+    }
+  };
+
+  const findings = await analyze(snapshot, network, { config });
+  const r16Findings = findings.filter(f => f.id === 'R16');
+
+  // Should flag:
+  // 1. PPID missing (high)
+  // 2. cust_params.user_tier missing (high)
+  // 3. pageTargeting.section missing (high)
+  // 4. slotTargeting.pos missing on slot_header (medium)
+  // 5. required slot_sidebar missing (high)
+  // 6. minSlots 2 expected, found 1 (medium)
+  assert.ok(r16Findings.length >= 6, `Expected at least 6 R16 findings, got ${r16Findings.length}`);
+
+  const ppidFinding = r16Findings.find(f => f.evidence.includes('ppid'));
+  assert.ok(ppidFinding, 'Must report missing PPID');
+  assert.equal(ppidFinding.severity, 'high');
+
+  const custFinding = r16Findings.find(f => f.evidence.includes('user_tier'));
+  assert.ok(custFinding, 'Must report missing user_tier');
+
+  const pageFinding = r16Findings.find(f => f.evidence.includes('section'));
+  assert.ok(pageFinding, 'Must report missing pageTargeting key section');
+
+  const slotMissingFinding = r16Findings.find(f => f.slot === 'slot_sidebar');
+  assert.ok(slotMissingFinding, 'Must report missing required slot_sidebar');
+
+  // Verify report generation includes compliance table
+  const { markdown, json } = renderReport(snapshot, network, findings, { config });
+  assert.ok(markdown.includes('Publisher Mandatory Parameters (Compliance)'));
+  assert.ok(markdown.includes('Test Publisher Media'));
+  assert.ok(markdown.includes('NON-COMPLIANT ❌'));
+  assert.ok(markdown.includes('PPID (Publisher Provided Identifier)'));
+  assert.equal(json.compliance.passed, false);
+  assert.ok(json.compliance.checks.some(c => c.name.includes('PPID') && !c.passed));
+
+  // Verify multi-host comparison reflects compliance failure
+  const compMd = renderComparison([json]);
+  assert.ok(compMd.includes('❌'));
+});
+
+test('analyze: R16 passes when all publisher requirements are satisfied', async () => {
+  const snapshot = {
+    meta: { url: 'https://compliant.example.com' },
+    gpt: {
+      present: true,
+      pageTargeting: { env: 'prod', section: 'news' }
+    },
+    slots: [
+      { elementId: 'slot_top', sizes: [[728, 90]], targeting: { pos: 'top' }, iframe: { present: true, safeFrame: true }, render: { isEmpty: false } }
+    ]
+  };
+
+  const network = {
+    requests: [
+      {
+        kind: 'display',
+        isSra: true,
+        ppid: true, // Satisfied
+        cust_params: { user_tier: 'premium', section: 'news' } // Satisfied
+      }
+    ]
+  };
+
+  const config = {
+    publisher: 'Compliant Publisher Group',
+    required: {
+      ppid: true,
+      custParams: ['user_tier'],
+      pageTargeting: ['env', 'section'],
+      slotTargeting: ['pos'],
+      minSlots: 1,
+      requiredElementIds: ['slot_top']
+    }
+  };
+
+  const findings = await analyze(snapshot, network, { config });
+  const r16Findings = findings.filter(f => f.id === 'R16');
+  assert.equal(r16Findings.length, 0, 'Compliant setup must trigger 0 R16 findings');
+
+  const { markdown, json } = renderReport(snapshot, network, findings, { config });
+  assert.ok(markdown.includes('COMPLIANT ✅'));
+  assert.equal(json.compliance.passed, true);
+  assert.ok(json.compliance.checks.every(c => c.passed));
+
+  const compMd = renderComparison([json]);
+  assert.ok(compMd.includes('✅ Pass'));
+});
+

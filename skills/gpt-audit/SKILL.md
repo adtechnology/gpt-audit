@@ -45,6 +45,7 @@ the judging, so the same input gives the same report in Antigravity, Claude Code
 
 8. **Analyze and report.** Run
    `node skills/gpt-audit/scripts/analyze.js out/<host>/snapshot.json out/<host>/network.json -o out/<host>/findings.json`
+   (if publisher mandates parameters, `gpt-audit.config.json` in the root is auto-detected, or pass `-c <config.json>`)
    then
    `node skills/gpt-audit/scripts/report.js out/<host>/snapshot.json out/<host>/network.json out/<host>/findings.json -o out/<host>/`.
 9. **Publisher Console.** `evaluate_script` → `googletag.openConsole()`, wait 1 s,

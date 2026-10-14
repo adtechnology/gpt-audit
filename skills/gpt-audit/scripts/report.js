@@ -1,22 +1,37 @@
 #!/usr/bin/env node
 // report.js — Phase 2 (see docs/PLAN.md, "Phase 2 — analyzer and report").
 //
-// CLI: node report.js <snapshot.json> <network.json> <findings.json> -o <out/<host>/>
+// CLI: node report.js <snapshot.json> <network.json> <findings.json> [-c <config.json>] -o <out/<host>/>
 //      → writes report.md and report.json in the layout given in the plan.
 // CLI: node report.js --compare out/*/report.json -o out/comparison.md
 //      → one table, one row per host: GPT version · slots · ad requests · SRA · lazy load ·
 //        initial load disabled · Prebid version · consent (gdpr, tcString present, npa) ·
-//        unfilled slots · findings by severity.
+//        unfilled slots · findings by severity · compliance status.
 
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { evaluateCompliance } from './rules/r16-publisher-mandatory-params.js';
 
-export function renderReport(snapshot, network, findings = []) {
+export function renderReport(snapshot, network, findings = [], options = {}) {
   const meta = snapshot?.meta || {};
   const gpt = snapshot?.gpt || {};
   const slots = snapshot?.slots || [];
   const requests = network?.requests || [];
   const neighbours = snapshot?.neighbours || {};
+
+  let config = options?.config || null;
+  if (!config && options?.configPath && existsSync(options.configPath)) {
+    try {
+      config = JSON.parse(readFileSync(options.configPath, 'utf8'));
+    } catch (_) {}
+  }
+  if (!config && existsSync('gpt-audit.config.json')) {
+    try {
+      config = JSON.parse(readFileSync('gpt-audit.config.json', 'utf8'));
+    } catch (_) {}
+  }
+
+  const compliance = evaluateCompliance(snapshot, network, config);
 
   const highFindings = findings.filter(f => f.severity?.toLowerCase() === 'high');
   const medFindings = findings.filter(f => f.severity?.toLowerCase() === 'medium');
@@ -52,6 +67,7 @@ export function renderReport(snapshot, network, findings = []) {
       low: lowFindings.length,
       total: findings.length
     },
+    compliance: compliance.active ? compliance : null,
     slots: slots.map(s => {
       const isBackfill = s.render?.isBackfill === true;
       const isEmpty = s.render?.isEmpty === true;
@@ -89,7 +105,8 @@ export function renderReport(snapshot, network, findings = []) {
       gdpr_consent_length: r.gdpr_consent || 0,
       npa: r.npa || null,
       ltd: r.ltd || null,
-      rdp: r.rdp || null
+      rdp: r.rdp || null,
+      ppid: r.ppid || false
     })),
     findings
   };
@@ -106,11 +123,31 @@ export function renderReport(snapshot, network, findings = []) {
   lines.push(`- **Slots Defined**: ${slots.length}`);
   lines.push(`- **Ad Requests (GAM)**: ${requests.length} (${requests.filter(r => r.kind === 'display').length} display, ${requests.filter(r => r.kind === 'video').length} video)`);
   lines.push(`- **Consent State**: GDPR: \`${consentSummary.gdpr}\` | TC String: \`${consentSummary.tcStringPresent ? `present (${consentSummary.tcStringLength} chars)` : 'absent'}\` | NPA: \`${consentSummary.npa ? '1' : '0'}\``);
+  if (compliance.active) {
+    const failedChecks = compliance.checks.filter(c => !c.passed).length;
+    lines.push(`- **Publisher Compliance**: **${compliance.publisher}** — **${compliance.passed ? 'COMPLIANT ✅' : `NON-COMPLIANT ❌ (${failedChecks} requirement(s) failed)`}**`);
+  }
   lines.push(`- **Findings Summary**: **High**: ${highFindings.length} | **Medium**: ${medFindings.length} | **Low**: ${lowFindings.length} (Total: ${findings.length})`);
   lines.push('');
 
-  // 2. Slot Table
-  lines.push('## 2. Slot Table');
+  // 2. Publisher Mandatory Parameters (if configured)
+  if (compliance.active) {
+    lines.push('## 2. Publisher Mandatory Parameters (Compliance)');
+    lines.push('');
+    lines.push(`Configuration Profile: **${compliance.publisher}** | Status: **${compliance.passed ? 'COMPLIANT ✅' : 'NON-COMPLIANT ❌'}**`);
+    lines.push('');
+    lines.push('| Requirement | Category | Status | Verification Evidence / Details |');
+    lines.push('| :--- | :--- | :--- | :--- |');
+    for (const c of compliance.checks) {
+      const statusIcon = c.passed ? '✅ Passed' : '❌ **Failed**';
+      lines.push(`| \`${c.name}\` | ${c.type} | ${statusIcon} | ${c.details} |`);
+    }
+    lines.push('');
+  }
+
+  // 3. Slot Table
+  const slotSectionNum = compliance.active ? '3' : '2';
+  lines.push(`## ${slotSectionNum}. Slot Table`);
   lines.push('');
   lines.push('| Element ID | Ad Unit Path | Requested Sizes | Rendered Size | Line Item ID | Creative ID | Advertiser ID | SafeFrame | In Viewport | Targeting Keys |');
   lines.push('| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |');
@@ -129,7 +166,7 @@ export function renderReport(snapshot, network, findings = []) {
   }
   lines.push('');
 
-  // 2b. Detailed Render Information for Rendered Slots
+  // 3b. Detailed Render Information for Rendered Slots
   lines.push('### Slot Render Details (Event Data)');
   lines.push('');
   lines.push('| Element ID | Empty | Rendered Size | Backfill | Line Item ID | Source Agnostic Line Item | Creative ID | Yield Group IDs | Fill Type |');
@@ -158,8 +195,9 @@ export function renderReport(snapshot, network, findings = []) {
   }
   lines.push('');
 
-  // 3. Findings
-  lines.push('## 3. Findings');
+  // 4. Findings
+  const findingsSectionNum = compliance.active ? '4' : '3';
+  lines.push(`## ${findingsSectionNum}. Findings`);
   lines.push('');
 
   const renderFindingsSection = (title, list) => {
@@ -183,15 +221,17 @@ export function renderReport(snapshot, network, findings = []) {
   renderFindingsSection('Medium Severity', medFindings);
   renderFindingsSection('Low Severity', lowFindings);
 
-  // 4. Request Table
-  lines.push('## 4. Ad Request Table (`gampad/ads`)');
+  // 5. Request Table
+  const requestSectionNum = compliance.active ? '5' : '4';
+  lines.push(`## ${requestSectionNum}. Ad Request Table (\`gampad/ads\`)`);
   lines.push('');
-  lines.push('| # | Kind | Correlator | Ad Units (Count) | Status | Duration | GDPR | Consent Present | Privacy Signals (npa/ltd/rdp) |');
-  lines.push('| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |');
+  lines.push('| # | Kind | Correlator | PPID | Ad Units (Count) | Status | Duration | GDPR | Consent Present | Privacy Signals (npa/ltd/rdp) |');
+  lines.push('| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |');
 
   requests.forEach((req, idx) => {
     const kind = req.kind || 'display';
     const corr = req.correlator || 'none';
+    const ppidStr = req.ppid ? 'yes' : 'no';
     const auCount = req.adUnits?.length || (req.iu ? 1 : 0);
     const auSnippet = auCount > 0 ? (req.adUnits?.[0] ? `${req.adUnits[0]} (${auCount})` : `${auCount} unit(s)`) : 'none';
     const status = req.status ?? 200;
@@ -200,12 +240,13 @@ export function renderReport(snapshot, network, findings = []) {
     const consent = (req.gdpr_consent && req.gdpr_consent > 0) ? `yes (${req.gdpr_consent} chars)` : 'no';
     const priv = `npa:${req.npa ?? '0'}, ltd:${req.ltd ?? '0'}, rdp:${req.rdp ?? '0'}`;
 
-    lines.push(`| ${idx + 1} | \`${kind}\` | \`${corr}\` | \`${auSnippet}\` | ${status} | ${dur} | ${gdpr} | ${consent} | \`${priv}\` |`);
+    lines.push(`| ${idx + 1} | \`${kind}\` | \`${corr}\` | ${ppidStr} | \`${auSnippet}\` | ${status} | ${dur} | ${gdpr} | ${consent} | \`${priv}\` |`);
   });
   lines.push('');
 
-  // 5. Appendix
-  lines.push('## 5. Appendix');
+  // 6. Appendix
+  const appendixSectionNum = compliance.active ? '6' : '5';
+  lines.push(`## ${appendixSectionNum}. Appendix`);
   lines.push('');
   lines.push('### Page-Level Targeting');
   lines.push('');
@@ -253,8 +294,8 @@ export function renderComparison(reports) {
   const lines = [];
   lines.push('# GPT Audit — Multi-Host Comparison');
   lines.push('');
-  lines.push('| Host | GPT Version | Slots | Ad Requests | SRA | Lazy Load | Initial Load Disabled | Prebid Version | Consent (GDPR/TC/NPA) | Unfilled Slots | Findings (H / M / L) |');
-  lines.push('| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |');
+  lines.push('| Host | GPT Version | Slots | Ad Requests | Compliance | SRA | Prebid | Consent (GDPR/TC/NPA) | Unfilled Slots | Findings (H / M / L) |');
+  lines.push('| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |');
 
   for (const rep of reports) {
     const meta = rep.meta || {};
@@ -262,6 +303,7 @@ export function renderComparison(reports) {
     const requests = rep.requests || [];
     const summary = rep.summary || {};
     const consent = meta.consent || {};
+    const compliance = rep.compliance || null;
 
     let host = 'unknown';
     try {
@@ -274,15 +316,18 @@ export function renderComparison(reports) {
 
     const hasSra = requests.some(r => r.isSra || r.kind === 'display');
     const sraStr = hasSra ? 'on' : 'off';
-    const lazyStr = 'n/a';
-    const initDisabledStr = 'no';
     const prebidVer = rep.prebid?.version || 'none';
+
+    let compStr = '-';
+    if (compliance?.active) {
+      compStr = compliance.passed ? '✅ Pass' : `❌ ${compliance.checks.filter(c => !c.passed).length} issue(s)`;
+    }
 
     const consentStr = `${consent.gdpr ?? '-'}/${consent.tcStringPresent ? 'yes' : 'no'}/${consent.npa ? '1' : '0'}`;
     const unfilledCount = slots.filter(s => s.lineItemId === 'unfilled' || s.render?.isEmpty === true).length;
     const findingsStr = `${summary.high ?? 0}H / ${summary.medium ?? 0}M / ${summary.low ?? 0}L`;
 
-    lines.push(`| **${host}** | \`${gptVer}\` | ${slotCount} | ${reqCount} | ${sraStr} | ${lazyStr} | ${initDisabledStr} | \`${prebidVer}\` | ${consentStr} | ${unfilledCount} | ${findingsStr} |`);
+    lines.push(`| **${host}** | \`${gptVer}\` | ${slotCount} | ${reqCount} | ${compStr} | ${sraStr} | \`${prebidVer}\` | ${consentStr} | ${unfilledCount} | ${findingsStr} |`);
   }
 
   lines.push('');
@@ -326,10 +371,13 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   let networkFile = null;
   let findingsFile = null;
   let outputDir = null;
+  let configFile = null;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '-o' && i + 1 < args.length) {
       outputDir = args[++i];
+    } else if ((args[i] === '-c' || args[i] === '--config') && i + 1 < args.length) {
+      configFile = args[++i];
     } else if (!snapshotFile) {
       snapshotFile = args[i];
     } else if (!networkFile) {
@@ -340,7 +388,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   }
 
   if (!snapshotFile || !networkFile || !findingsFile) {
-    console.error('Usage: node report.js <snapshot.json> <network.json> <findings.json> -o <out/<host>/>');
+    console.error('Usage: node report.js <snapshot.json> <network.json> <findings.json> [-c <config.json>] -o <out/<host>/>');
     console.error('       node report.js --compare out/*/report.json -o out/comparison.md');
     process.exit(1);
   }
@@ -350,7 +398,14 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const network = JSON.parse(readFileSync(networkFile, 'utf8'));
     const findings = JSON.parse(readFileSync(findingsFile, 'utf8'));
 
-    const { markdown, json } = renderReport(snapshot, network, findings);
+    let config = null;
+    if (configFile) {
+      config = JSON.parse(readFileSync(configFile, 'utf8'));
+    } else if (existsSync('gpt-audit.config.json')) {
+      config = JSON.parse(readFileSync('gpt-audit.config.json', 'utf8'));
+    }
+
+    const { markdown, json } = renderReport(snapshot, network, findings, { config });
 
     if (outputDir) {
       mkdirSync(outputDir, { recursive: true });

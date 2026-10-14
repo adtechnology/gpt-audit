@@ -141,10 +141,69 @@ The Slot Table in `report.md` classifies ad fills into three clear categories:
   - `[R10]` Legacy host (`googletagservices.com`) or duplicate gpt.js tags.
 - **Low Severity**: Architecture recommendations:
   - `[R06]` Single Request Architecture (SRA) disabled.
+- **Publisher Compliance (High / Medium)**:
+  - `[R16]` Publisher mandatory parameter missing (e.g. PPID omitted, required page targeting absent, required custom parameters missing in `cust_params`).
 
 ---
 
-## 7. Standalone CLI Usage (Without an Agent / CI)
+## 7. Publisher Mandatory Parameters (`gpt-audit.config.json`)
+
+Publishers often enforce internal tagging policies and mandatory parameters ("Pflichtparameter") — such as requiring a **PPID (Publisher Provided Identifier)** on authenticated sessions, mandatory key-value targeting (e.g. `section`, `user_tier`), or specific slot names.
+
+You can specify these rules in a `gpt-audit.config.json` file in your project root, or pass a custom config via `-c <config.json>`:
+
+```json
+{
+  "$schema": "./gpt-audit.config.schema.json",
+  "publisher": "Example Media Group",
+  "required": {
+    "ppid": true,
+    "custParams": ["section", "user_tier"],
+    "pageTargeting": ["env", "edition"],
+    "slotTargeting": ["pos"],
+    "minSlots": 1,
+    "requireSra": false,
+    "requireSafeFrame": false
+  },
+  "slots": {
+    "requiredElementIds": ["top-leaderboard"]
+  }
+}
+```
+
+### Configurable Checks
+
+| Field | Check Performed | Severity if Violated |
+| :--- | :--- | :--- |
+| `ppid: true` | Validates that all display ad requests to GAM contain a non-empty `ppid` parameter (`req.ppid === true`). | **High** (`R16`) |
+| `custParams: [...]` | Checks that `req.cust_params` in display requests includes each specified key with non-empty values. | **High** (`R16`) |
+| `pageTargeting: [...]` | Checks that `gpt.pageTargeting` contains each key (set via `googletag.pubads().setTargeting(...)`). | **High** (`R16`) |
+| `slotTargeting: [...]` | Checks that each defined slot in `snapshot.slots` has the specified targeting keys. | **Medium** (`R16`) |
+| `requiredElementIds: [...]` | Ensures specific slot container element IDs are registered on the page. | **High** (`R16`) |
+| `minSlots: <number>` | Verifies that the total slot count meets or exceeds the required threshold. | **Medium** (`R16`) |
+| `requireSafeFrame: true` | Verifies that all rendered creatives are served in SafeFrames. | **Medium** (`R16`) |
+
+### Compliance Report Output
+When a configuration file is active, `report.md` includes a dedicated compliance matrix:
+
+```markdown
+## 2. Publisher Mandatory Parameters (Compliance)
+
+Configuration Profile: **Example Media Group** | Status: **COMPLIANT ✅**
+
+| Requirement | Category | Status | Verification Evidence / Details |
+| :--- | :--- | :--- | :--- |
+| `PPID (Publisher Provided Identifier)` | Ad Request | ✅ Passed | Present across all 3 display ad request(s) |
+| `cust_params: 'section'` | Ad Request | ✅ Passed | Present across all 3 display ad request(s) |
+| `Page Targeting: 'env'` | Page Config | ✅ Passed | Configured: "production" |
+| `Slot Targeting: 'pos'` | Slot Config | ✅ Passed | Present on all 4 slot(s) |
+```
+
+If any check fails, `analyze.js` automatically creates **High** or **Medium** severity `R16` findings detailing exactly which requests or slots failed and providing the exact JavaScript fix.
+
+---
+
+## 8. Standalone CLI Usage (Without an Agent / CI)
 
 You can run the parsing, analysis, and reporting pipeline directly using Node.js without driving a browser:
 

@@ -1,0 +1,83 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "GPTAuditPublisherConfig",
+  "description": "Configuration schema for publisher mandatory parameters in gpt-audit",
+  "type": "object",
+  "properties": {
+    "publisher": {
+      "type": "string",
+      "description": "Name of the publisher, network, or audit profile"
+    },
+    "version": {
+      "type": "string",
+      "description": "Configuration schema version"
+    },
+    "required": {
+      "type": "object",
+      "description": "Mandatory parameters and compliance constraints",
+      "properties": {
+        "ppid": {
+          "type": "boolean",
+          "description": "If true, mandates that all display ad requests include a Publisher Provided Identifier (PPID)"
+        },
+        "requestParams": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "List of query parameters required in GAM ad requests (e.g. 'ppid')"
+        },
+        "custParams": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "List of custom targeting keys required in ad request cust_params"
+        },
+        "pageTargeting": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "List of targeting keys required in googletag.pubads().setTargeting()"
+        },
+        "slotTargeting": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "List of targeting keys required on every defined slot"
+        },
+        "minSlots": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Minimum expected count of defined ad slots on the page"
+        },
+        "requiredElementIds": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "List of specific slot element IDs that must be present on page"
+        },
+        "requireSafeFrame": {
+          "type": "boolean",
+          "description": "If true, mandates that rendered creatives use SafeFrames"
+        },
+        "requireSra": {
+          "type": "boolean",
+          "description": "If true, mandates that Single Request Architecture (SRA) is enabled"
+        }
+      }
+    },
+    "ppid": {
+      "type": "boolean",
+      "description": "Convenience alias for required.ppid"
+    },
+    "custParams": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Convenience alias for required.custParams"
+    },
+    "pageTargeting": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Convenience alias for required.pageTargeting"
+    },
+    "slotTargeting": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Convenience alias for required.slotTargeting"
+    }
+  }
+}

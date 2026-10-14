@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 // analyze.js — Phase 2 (see docs/PLAN.md, "Phase 2 — analyzer and report").
 //
-// CLI: node analyze.js <snapshot.json> <network.json> -o <findings.json>
+// CLI: node analyze.js <snapshot.json> <network.json> [-c <config.json>] [-o <findings.json>]
 // Loads every rule module in ./rules/ (one file per rule id), runs them in id order,
 // writes the concatenated findings: { id, severity, slot, evidence, fix }[]. Deterministic, no network, no LLM.
 
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 import r01 from './rules/r01-slot-never-displayed.js';
@@ -18,6 +18,7 @@ import r07 from './rules/r07-mixed-correlators.js';
 import r08 from './rules/r08-initial-load-disabled-no-refresh.js';
 import r09 from './rules/r09-consent-mismatch.js';
 import r10 from './rules/r10-legacy-or-duplicate-gpt.js';
+import r16 from './rules/r16-publisher-mandatory-params.js';
 
 const RULES = [
   { id: 'R01', run: r01 },
@@ -29,17 +30,40 @@ const RULES = [
   { id: 'R07', run: r07 },
   { id: 'R08', run: r08 },
   { id: 'R09', run: r09 },
-  { id: 'R10', run: r10 }
+  { id: 'R10', run: r10 },
+  { id: 'R16', run: r16 }
 ];
 
 const SEVERITY_ORDER = { high: 1, medium: 2, low: 3 };
 
-export async function analyze(snapshot, network) {
+export async function analyze(snapshot, network, options = {}) {
+  let config = null;
+
+  if (options && typeof options === 'object') {
+    if (options.config && typeof options.config === 'object') {
+      config = options.config;
+    } else if (options.configPath && typeof options.configPath === 'string' && existsSync(options.configPath)) {
+      try {
+        config = JSON.parse(readFileSync(options.configPath, 'utf8'));
+      } catch (_) {}
+    } else if (options.required || options.ppid !== undefined || options.custParams || options.pageTargeting) {
+      config = options;
+    }
+  }
+
+  // Auto-detect gpt-audit.config.json if no config explicitly provided
+  if (!config && existsSync('gpt-audit.config.json')) {
+    try {
+      config = JSON.parse(readFileSync('gpt-audit.config.json', 'utf8'));
+    } catch (_) {}
+  }
+
+  const context = { config };
   const allFindings = [];
 
   for (const { id, run } of RULES) {
     try {
-      const res = await run(snapshot, network);
+      const res = await run(snapshot, network, context);
       if (Array.isArray(res)) {
         allFindings.push(...res);
       }
@@ -71,10 +95,13 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   let snapshotFile = null;
   let networkFile = null;
   let outputFile = null;
+  let configFile = null;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '-o' && i + 1 < args.length) {
       outputFile = args[++i];
+    } else if ((args[i] === '-c' || args[i] === '--config') && i + 1 < args.length) {
+      configFile = args[++i];
     } else if (!snapshotFile) {
       snapshotFile = args[i];
     } else if (!networkFile) {
@@ -83,7 +110,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   }
 
   if (!snapshotFile || !networkFile) {
-    console.error('Usage: node analyze.js <snapshot.json> <network.json> [-o <findings.json>]');
+    console.error('Usage: node analyze.js <snapshot.json> <network.json> [-c <config.json>] [-o <findings.json>]');
     process.exit(1);
   }
 
@@ -91,7 +118,16 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const snapshot = JSON.parse(readFileSync(snapshotFile, 'utf8'));
     const network = JSON.parse(readFileSync(networkFile, 'utf8'));
 
-    const findings = await analyze(snapshot, network);
+    let config = null;
+    if (configFile) {
+      config = JSON.parse(readFileSync(configFile, 'utf8'));
+      console.log(`Loaded publisher config from ${configFile}`);
+    } else if (existsSync('gpt-audit.config.json')) {
+      config = JSON.parse(readFileSync('gpt-audit.config.json', 'utf8'));
+      console.log('Auto-detected publisher config from gpt-audit.config.json');
+    }
+
+    const findings = await analyze(snapshot, network, { config });
     const jsonOutput = JSON.stringify(findings, null, 2);
 
     if (outputFile) {

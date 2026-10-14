@@ -18,6 +18,7 @@ Evidence names the exact fields of `snapshot.json` (collector) and `network.json
 | R08 | Initial load disabled but nothing ever refreshed | High | Implemented | `gpt.initialLoadDisabled === true`, zero `kind: "display"` requests fired, and no probe `slotRequested` events | Add a fallback timeout in header bidding to trigger `googletag.pubads().refresh()` |
 | R09 | Consent mismatch | High | Implemented | `gdpr=1` with empty/missing `gdpr_consent` (length 0); or `gdpr=1` without `window.__tcfapi` present; or TCF purpose 1 consent false while ad requests omit both `npa=1` and `ltd=1` | Verify CMP wiring passes a valid TC string before GPT requests, or set `npa=1`/`ltd=1` when Purpose 1 consent is denied |
 | R10 | Legacy or duplicate gpt.js | Medium | Implemented | `gpt.legacyHost === true` (`googletagservices.com`), more than one gpt.js script tag, or a script tag without `async` | Load exactly one asynchronous tag from `https://securepubads.g.doubleclick.net/tag/js/gpt.js` |
+| R16 | Publisher mandatory parameter missing | High / Medium | Implemented | Snapshot or ad requests lack parameters specified in publisher config (`gpt-audit.config.json`): missing PPID, missing required `cust_params`, missing page targeting, or missing slot targeting | Ensure mandatory parameters are passed in GPT targeting or set via `pubads().setPublisherProvidedId(...)` |
 
 ## Planned / Stretch Rules (R11–R15)
 

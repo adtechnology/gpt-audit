@@ -815,7 +815,8 @@
     <div class="nav-group">
       <div class="nav-title">Audit Engine</div>
       <ul class="nav-links">
-        <li class="nav-item"><a href="#rules">Rules Catalog (R01–R15)</a></li>
+        <li class="nav-item"><a href="#config">Publisher Config & PPID</a></li>
+        <li class="nav-item"><a href="#rules">Rules Catalog (R01–R16)</a></li>
         <li class="nav-item"><a href="#sample-report">Live Audit Preview</a></li>
         <li class="nav-item"><a href="#guardrails">Safety Guardrails</a></li>
         <li class="nav-item"><a href="#cli">Standalone CLI / CI</a></li>
@@ -1015,18 +1016,99 @@ codex</code></pre>
       </div>
     </section>
 
+    <!-- Publisher Mandatory Parameters Section -->
+    <section id="config">
+      <div class="section-header">
+        <span class="section-tag">Publisher Policy Enforcement</span>
+        <h2 class="section-title">Publisher Mandatory Parameters ("Pflichtparameter")</h2>
+        <p class="section-desc">Enforce publisher tagging requirements — including PPID (Publisher Provided Identifier), mandatory targeting keys (<code>cust_params</code> and <code>pageTargeting</code>), slot constraints, and SafeFrame policies via <code>gpt-audit.config.json</code>.</p>
+      </div>
+
+      <div class="install-grid">
+        <div class="install-card">
+          <div class="install-card-header">
+            <div class="install-platform-badge antigravity">Config Spec</div>
+            <h3 class="install-title">gpt-audit.config.json</h3>
+          </div>
+          <div class="install-card-body">
+            <p>Place in your project root or pass via <code>-c &lt;config.json&gt;</code> to analyze and report tools:</p>
+            <div class="code-box">
+              <div class="code-header">
+                <span>gpt-audit.config.json</span>
+                <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+              </div>
+              <pre><code>{
+  "publisher": "Example Media Network",
+  "required": {
+    "ppid": true,
+    "custParams": ["section", "user_tier"],
+    "pageTargeting": ["env", "edition"],
+    "slotTargeting": ["pos"],
+    "minSlots": 1,
+    "requireSafeFrame": false
+  }
+}</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="install-card">
+          <div class="install-card-header">
+            <div class="install-platform-badge codex">Compliance Matrix</div>
+            <h3 class="install-title">Automated Verification</h3>
+          </div>
+          <div class="install-card-body">
+            <p>Generated in <code>report.md</code> and verified by rule <code>R16</code>:</p>
+            <div class="table-container" style="margin-top:12px;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Requirement</th>
+                    <th>Type</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>PPID (User ID)</code></td>
+                    <td>Ad Request</td>
+                    <td><span class="badge-sev" style="background:rgba(52,211,153,0.15);color:#34d399">✅ Passed</span></td>
+                  </tr>
+                  <tr>
+                    <td><code>cust_params: 'section'</code></td>
+                    <td>Ad Request</td>
+                    <td><span class="badge-sev" style="background:rgba(52,211,153,0.15);color:#34d399">✅ Passed</span></td>
+                  </tr>
+                  <tr>
+                    <td><code>pageTargeting: 'env'</code></td>
+                    <td>Page Config</td>
+                    <td><span class="badge-sev" style="background:rgba(52,211,153,0.15);color:#34d399">✅ Passed</span></td>
+                  </tr>
+                  <tr>
+                    <td><code>slotTargeting: 'pos'</code></td>
+                    <td>Slot Config</td>
+                    <td><span class="badge-sev" style="background:rgba(52,211,153,0.15);color:#34d399">✅ Passed</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- Rule Catalog Section -->
     <section id="rules">
       <div class="section-header">
         <span class="section-tag">Deterministic Engine</span>
-        <h2 class="section-title">Anomaly Rules Catalog (R01–R15)</h2>
+        <h2 class="section-title">Anomaly Rules Catalog (R01–R16)</h2>
         <p class="section-desc">Rules are implemented as plain Node 22 ESM modules in <code>scripts/rules/</code>. No external LLM is involved in judging; the same page generates identical findings in every agent.</p>
       </div>
 
       <div class="catalog-controls">
         <input type="text" id="ruleSearch" class="search-input" placeholder="Search rules, keywords, or evidence..." oninput="filterRules()">
         <div class="filter-btn-group">
-          <button class="filter-btn active" onclick="setSeverityFilter('all', this)">All (15)</button>
+          <button class="filter-btn active" onclick="setSeverityFilter('all', this)">All (16)</button>
           <button class="filter-btn" onclick="setSeverityFilter('high', this)">High</button>
           <button class="filter-btn" onclick="setSeverityFilter('medium', this)">Medium</button>
           <button class="filter-btn" onclick="setSeverityFilter('low', this)">Low</button>
@@ -1142,6 +1224,17 @@ codex</code></pre>
           <div class="rule-name">Legacy or Duplicate gpt.js</div>
           <div class="rule-evidence">Loaded from legacy <code>googletagservices.com</code>, multiple script tags, or tag lacks async attribute.</div>
           <div class="rule-fix">Load single async tag from <code>securepubads.g.doubleclick.net/tag/js/gpt.js</code>.</div>
+        </div>
+
+        <!-- R16 -->
+        <div class="rule-card" data-severity="high">
+          <div class="rule-top">
+            <span class="rule-id">R16</span>
+            <span class="badge-sev high">High</span>
+          </div>
+          <div class="rule-name">Publisher Mandatory Parameter Missing</div>
+          <div class="rule-evidence">Snapshot or ad requests lack parameters specified in <code>gpt-audit.config.json</code> (e.g. PPID, cust_params, pageTargeting).</div>
+          <div class="rule-fix">Ensure required parameters are set via <code>pubads().setPublisherProvidedId()</code> or targeting APIs.</div>
         </div>
 
         <!-- R11-R15 (Planned) -->
