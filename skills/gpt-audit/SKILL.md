@@ -15,7 +15,7 @@ the judging, so the same input gives the same report in Antigravity, Claude Code
 
 ## Outputs, per URL, in `out/<host>/`
 
-`snapshot-initial.json`, `snapshot.json`, `network-raw.json`, `network.json`, `findings.json`,
+`snapshot-initial.json`, `snapshot.json`, `network-raw.txt`, `network.json`, `findings.json`,
 `report.md`, `report.json`, `page.png`, `console.png`. Several URLs: also `out/comparison.md`.
 
 ## Procedure
@@ -40,8 +40,9 @@ the judging, so the same input gives the same report in Antigravity, Claude Code
    the probe events (`window.__gptAudit.events`) and any lazy-loaded slots.
 7. **Network log.** `list_network_requests`; for every row whose URL contains `gampad/ads`,
    `/tag/js/gpt.js` or `pubads_impl`, call `get_network_request` for the full URL, status and timing.
-   Save everything as one JSON array to `out/<host>/network-raw.json`, then run
-   `node skills/gpt-audit/scripts/network-extract.js out/<host>/network-raw.json -o out/<host>/network.json`.
+   Save the tool output verbatim to `out/<host>/network-raw.txt`, then run
+   `node skills/gpt-audit/scripts/network-extract.js out/<host>/network-raw.txt -o out/<host>/network.json`.
+
 8. **Analyze and report.** Run
    `node skills/gpt-audit/scripts/analyze.js out/<host>/snapshot.json out/<host>/network.json -o out/<host>/findings.json`
    then
@@ -69,7 +70,7 @@ the judging, so the same input gives the same report in Antigravity, Claude Code
 | File | Purpose |
 | --- | --- |
 | `scripts/collect-gpt.js` | runs inside the page via `evaluate_script`; returns the snapshot JSON |
-| `scripts/network-extract.js` | Node CLI: raw MCP network dump → `network.json` with parsed `gampad/ads` parameters |
+| `scripts/network-extract.js` | Node CLI: raw MCP network dump (`network-raw.txt`) → `network.json` with parsed `gampad/ads` parameters |
 | `scripts/analyze.js` | Node CLI: snapshot + network → `findings.json` (rules in `scripts/rules/`) |
 | `scripts/report.js` | Node CLI: → `report.md`, `report.json`; `--compare` → `comparison.md` |
 | `references/anomaly-catalog.md` | rule ids R01–R15 with severity, evidence and fix |

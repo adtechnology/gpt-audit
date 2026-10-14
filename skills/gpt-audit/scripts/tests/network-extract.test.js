@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseAdRequestUrl, extractNetworkData } from '../network-extract.js';
+import { parseAdRequestUrl, extractNetworkData, parseNetworkRaw } from '../network-extract.js';
 
 test('parseAdRequestUrl: non-SRA request', () => {
   const url = 'https://securepubads.g.doubleclick.net/gampad/ads?iu=/6355419/Travel/Europe&sz=300x250&correlator=987654321&cust_params=section%3Deurope%26edition%3Duk%26topics%3Dskiing,alps&gdpr=1&gdpr_consent=CP1234567890ABCDEF&npa=1&ppid=user_anon_123&pvsid=pvs_555&ifi=1';
@@ -8,6 +8,7 @@ test('parseAdRequestUrl: non-SRA request', () => {
 
   assert.equal(parsed.host, 'securepubads.g.doubleclick.net');
   assert.equal(parsed.isSra, false);
+  assert.equal(parsed.kind, 'display');
   assert.equal(parsed.correlator, '987654321');
   assert.deepEqual(parsed.adUnits, ['/6355419/Travel/Europe']);
   assert.equal(parsed.iu, '/6355419/Travel/Europe');
@@ -30,6 +31,7 @@ test('parseAdRequestUrl: SRA request with iu_parts and enc_prev_ius', () => {
   const parsed = parseAdRequestUrl(url);
 
   assert.equal(parsed.isSra, true);
+  assert.equal(parsed.kind, 'display');
   assert.equal(parsed.correlator, '11223344');
   assert.equal(parsed.iu_parts, '6355419,Travel,Europe,France,Paris');
   assert.equal(parsed.enc_prev_ius, '/0/1/2/3/4,/0/1/2');
@@ -50,10 +52,52 @@ test('parseAdRequestUrl: SRA request without enc_prev_ius', () => {
   const parsed = parseAdRequestUrl(url);
 
   assert.equal(parsed.isSra, true);
+  assert.equal(parsed.kind, 'display');
   assert.deepEqual(parsed.adUnits, ['/6355419/News/FrontPage']);
 });
 
-test('extractNetworkData: filters ad requests and libraries correctly', () => {
+test('parseAdRequestUrl: video vs display kind classification', () => {
+  const vast4 = parseAdRequestUrl('https://securepubads.g.doubleclick.net/gampad/ads?output=xml_vast4&iu=/123/video');
+  assert.equal(vast4.kind, 'video');
+
+  const vast3 = parseAdRequestUrl('https://securepubads.g.doubleclick.net/gampad/ads?output=vast&iu=/123/video');
+  assert.equal(vast3.kind, 'video');
+
+  const displayLdjh = parseAdRequestUrl('https://securepubads.g.doubleclick.net/gampad/ads?output=ldjh&iu=/123/display');
+  assert.equal(displayLdjh.kind, 'display');
+
+  const displayDefault = parseAdRequestUrl('https://securepubads.g.doubleclick.net/gampad/ads?iu=/123/display');
+  assert.equal(displayDefault.kind, 'display');
+});
+
+test('parseNetworkRaw: parses verbatim MCP tool output', () => {
+  const verbatim = `
+## Request https://securepubads.g.doubleclick.net/tag/js/gpt.js
+Status: 200
+### Request Headers
+- referer:https://www.telegraph.co.uk/
+
+## Request https://securepubads.g.doubleclick.net/gampad/ads?iu=/6582/test&sz=300x250&correlator=123&output=ldjh
+Status: 200
+### Request Headers
+- referer:https://www.telegraph.co.uk/
+
+## Request https://securepubads.g.doubleclick.net/gampad/ads?iu=/6582/video&sz=620x415&output=xml_vast4&correlator=456
+Status: 200
+`;
+
+  const parsed = extractNetworkData(verbatim);
+  assert.equal(parsed.libraries.length, 1);
+  assert.equal(parsed.libraries[0].name, 'gpt.js');
+
+  assert.equal(parsed.requests.length, 2);
+  assert.equal(parsed.requests[0].kind, 'display');
+  assert.equal(parsed.requests[0].correlator, '123');
+  assert.equal(parsed.requests[1].kind, 'video');
+  assert.equal(parsed.requests[1].correlator, '456');
+});
+
+test('extractNetworkData: filters ad requests and libraries correctly from JSON objects', () => {
   const rawItems = [
     {
       url: 'https://securepubads.g.doubleclick.net/tag/js/gpt.js',
@@ -82,6 +126,7 @@ test('extractNetworkData: filters ad requests and libraries correctly', () => {
 
   const result = extractNetworkData(rawItems);
   assert.equal(result.requests.length, 1);
+  assert.equal(result.requests[0].kind, 'display');
   assert.equal(result.requests[0].correlator, '999');
   assert.equal(result.requests[0].adUnits[0], '/6355419/Home');
   assert.equal(result.requests[0].status, 200);

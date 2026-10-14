@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // network-extract.js — Phase 1 (see docs/PLAN.md, "Phase 1 — collector").
 //
-// CLI: node network-extract.js <network-raw.json> -o <network.json>
-// Input: the JSON array the agent saved from the MCP tools list_network_requests + get_network_request.
+// CLI: node network-extract.js <network-raw.txt> -o <network.json>
+// Input: verbatim output from list_network_requests / get_network_request saved in network-raw.txt.
 // Output: one row per request to */gampad/ads with status, start time, duration, URL length and the parsed
 // query (see references/gampad-params.md), plus every gpt.js / pubads_impl load with its timing.
 
@@ -40,6 +40,10 @@ export function parseAdRequestUrl(url) {
   const u = new URL(url);
   const p = u.searchParams;
 
+  const outputParam = p.get('output') || '';
+  const isVideo = outputParam.startsWith('vast') || outputParam.startsWith('xml_vast');
+  const kind = isVideo ? 'video' : 'display';
+
   const iu = p.get('iu');
   const iuParts = p.get('iu_parts');
   const encPrevIus = p.get('enc_prev_ius');
@@ -72,6 +76,7 @@ export function parseAdRequestUrl(url) {
     host: u.host,
     path: u.pathname,
     urlLength: url.length,
+    kind,
     isSra,
     correlator: p.get('correlator'),
     adUnits,
@@ -105,8 +110,55 @@ export function parseAdRequestUrl(url) {
   };
 }
 
-export function extractNetworkData(rawItems) {
-  const items = Array.isArray(rawItems) ? rawItems : (rawItems.requests || rawItems.data || []);
+export function parseNetworkRaw(rawContent) {
+  const trimmed = rawContent.trim();
+  if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+    try {
+      const data = JSON.parse(trimmed);
+      return Array.isArray(data) ? data : (data.requests || data.data || []);
+    } catch (_) {}
+  }
+
+  const items = [];
+
+  // Match "## Request <url>" blocks from get_network_request
+  if (rawContent.includes('## Request')) {
+    const blocks = rawContent.split(/^## Request\s+/m);
+    for (const block of blocks) {
+      if (!block.trim()) continue;
+      const firstLineEnd = block.indexOf('\n');
+      const url = (firstLineEnd !== -1 ? block.slice(0, firstLineEnd) : block).trim();
+      if (!url.startsWith('http://') && !url.startsWith('https://')) continue;
+
+      const rest = firstLineEnd !== -1 ? block.slice(firstLineEnd) : '';
+      const statusMatch = rest.match(/^Status:\s*(\d+)/m);
+      const status = statusMatch ? parseInt(statusMatch[1], 10) : 200;
+
+      const startTimeMatch = rest.match(/startTime[:=]\s*([\d.]+)/i) || rest.match(/start[:=]\s*([\d.]+)/i);
+      const durationMatch = rest.match(/duration[:=]\s*([\d.]+)/i) || rest.match(/time[:=]\s*([\d.]+)/i);
+      const startTime = startTimeMatch ? parseFloat(startTimeMatch[1]) : null;
+      const duration = durationMatch ? parseFloat(durationMatch[1]) : null;
+
+      items.push({ url, status, startTime, duration });
+    }
+    return items;
+  }
+
+  // Match "reqid=<id> GET/POST <url> [<status>]" lines from list_network_requests
+  const lineRegex = /reqid=\d+\s+(?:GET|POST)\s+(\S+)(?:\s+\[(\d+)\])?/g;
+  let match;
+  while ((match = lineRegex.exec(rawContent)) !== null) {
+    items.push({
+      url: match[1],
+      status: match[2] ? parseInt(match[2], 10) : 200
+    });
+  }
+
+  return items;
+}
+
+export function extractNetworkData(rawInput) {
+  const items = typeof rawInput === 'string' ? parseNetworkRaw(rawInput) : (Array.isArray(rawInput) ? rawInput : (rawInput.requests || rawInput.data || []));
   const requests = [];
   const libraries = [];
 
@@ -175,14 +227,13 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   }
 
   if (!inputFile) {
-    console.error('Usage: node network-extract.js <network-raw.json> [-o <network.json>]');
+    console.error('Usage: node network-extract.js <network-raw.txt> [-o <network.json>]');
     process.exit(1);
   }
 
   try {
     const rawContent = readFileSync(inputFile, 'utf8');
-    const rawData = JSON.parse(rawContent);
-    const result = extractNetworkData(rawData);
+    const result = extractNetworkData(rawContent);
     const formatted = JSON.stringify(result, null, 2);
 
     if (outputFile) {

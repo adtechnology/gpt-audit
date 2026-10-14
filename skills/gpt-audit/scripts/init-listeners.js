@@ -26,8 +26,15 @@
               slotElementId: event.slot ? event.slot.getSlotElementId() : null,
               isEmpty: typeof event.isEmpty === 'boolean' ? event.isEmpty : null,
               size: event.size || null,
+              isBackfill: typeof event.isBackfill === 'boolean' ? event.isBackfill : null,
               lineItemId: event.lineItemId ?? null,
               creativeId: event.creativeId ?? null,
+              advertiserId: event.advertiserId ?? null,
+              campaignId: event.campaignId ?? null,
+              sourceAgnosticLineItemId: event.sourceAgnosticLineItemId ?? null,
+              sourceAgnosticCreativeId: event.sourceAgnosticCreativeId ?? null,
+              yieldGroupIds: event.yieldGroupIds || null,
+              companyIds: event.companyIds || null,
               serviceName: event.serviceName || null
             });
           } catch (_) {}
